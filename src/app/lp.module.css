@@ -1,0 +1,653 @@
+/* ── Landing Page styles (scoped via CSS Module) ── */
+
+.root {
+  --blue-900: #052d64;
+  --blue-700: #0a3d8e;
+  --blue-600: #1455bd;
+  --orange-500: #fe7902;
+  --ink: #0a2f6b;
+  --muted: #5b6b87;
+  --white: #ffffff;
+
+  font-family: var(--font-manrope), 'Manrope', sans-serif;
+  color: var(--ink);
+  background: radial-gradient(circle at 100% 80%, rgba(10, 61, 142, 0.1), transparent 40%), #ffffff;
+}
+
+.root * {
+  box-sizing: border-box;
+}
+
+.root h1,
+.root h2,
+.root h3 {
+  font-family: var(--font-sora), 'Sora', sans-serif;
+  margin: 0;
+}
+
+.root h1 span,
+.root h2 span {
+  color: var(--orange-500);
+}
+
+/* ── CONTAINER ── */
+.container {
+  width: min(1220px, 92%);
+  margin: 0 auto;
+}
+
+/* ── HEADER ── */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(255, 255, 255, 0.94);
+  border-bottom: 1px solid rgba(5, 45, 100, 0.1);
+  backdrop-filter: blur(6px);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 0;
+}
+
+.brand {
+  width: 168px;
+  height: auto;
+}
+
+.menu {
+  display: flex;
+  gap: 28px;
+}
+
+.menu a {
+  text-decoration: none;
+  color: var(--blue-900);
+  font-weight: 700;
+  transition: color 0.2s;
+}
+
+.menu a:hover {
+  color: var(--orange-500);
+}
+
+.menuActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* ── BUTTONS ── */
+.btn {
+  text-decoration: none;
+  border-radius: 12px;
+  padding: 12px 18px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.btnLink {
+  color: var(--blue-900);
+}
+
+.btnLink:hover {
+  color: var(--orange-500);
+}
+
+.btnSolid {
+  background: linear-gradient(135deg, var(--orange-500), #ff8b1e);
+  color: #fff;
+  box-shadow: 0 12px 24px rgba(254, 121, 2, 0.28);
+}
+
+.btnSolid:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 16px 32px rgba(254, 121, 2, 0.36);
+}
+
+.btnGhost {
+  border-color: rgba(10, 61, 142, 0.25);
+  color: var(--blue-700);
+  background: #fff;
+}
+
+.btnGhost:hover {
+  border-color: var(--blue-600);
+  background: #f4f8ff;
+}
+
+/* ── SECTIONS ── */
+.root section {
+  padding: 52px 0;
+}
+
+.sectionIntro {
+  margin: 12px 0 0;
+  font-size: 18px;
+  color: var(--muted);
+}
+
+/* ── HERO ── */
+.hero {
+  padding: 0 !important;
+  overflow: hidden;
+  background-image: url('/landing/hero-background.webp');
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: cover;
+}
+
+.heroGrid {
+  display: grid;
+  grid-template-columns: 1fr 1.03fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.heroCopy {
+  padding-top: 18px;
+  padding-bottom: 40px;
+}
+
+.eyebrow {
+  margin: 0;
+  display: inline-block;
+  padding: 10px 14px;
+  border: 1px solid rgba(10, 61, 142, 0.2);
+  border-radius: 999px;
+  color: var(--blue-700);
+  font-weight: 800;
+  font-size: 14px;
+  background: #fff;
+}
+
+.root .heroCopy h1 {
+  margin-top: 20px;
+  font-size: clamp(42px, 7vw, 80px);
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  max-width: 9.5ch;
+  color: var(--blue-900);
+}
+
+.subtitle {
+  margin: 18px 0 0;
+  font-size: clamp(16px, 1.8vw, 22px);
+  color: var(--muted);
+  line-height: 1.45;
+  max-width: 52ch;
+}
+
+.heroActions {
+  margin-top: 28px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.heroBadges {
+  margin: 22px 0 0;
+  list-style: none;
+  padding: 0;
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  color: var(--blue-900);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+/* ── HERO VISUAL ── */
+.heroVisual {
+  position: relative;
+  min-height: 740px;
+  background: transparent;
+}
+
+.mascot {
+  position: absolute !important;
+  width: 490px !important;
+  max-width: 100%;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  top: 40px !important;
+  z-index: 6;
+  filter: drop-shadow(0 28px 38px rgba(5, 45, 100, 0.28));
+  height: auto !important;
+}
+
+.heroWidget {
+  position: absolute !important;
+  padding: 10px;
+  background: #ffffff;
+  border: 1px solid rgba(10, 61, 142, 0.14);
+  border-radius: 20px;
+  box-shadow: 0 18px 38px rgba(17, 39, 78, 0.18);
+  height: auto !important;
+}
+
+.widget1 { left: 40px; top: 84px; width: 240px !important; z-index: 3; }
+.widget2 { right: -35px; top: 50px; width: 270px !important; z-index: 3; }
+.widget3 { left: -16px; top: 352px; width: 286px !important; z-index: 3; }
+.widget4 { right: -15px; bottom: 150px; width: 220px !important; z-index: 3; }
+
+/* ── PAIN POINT ── */
+.painGrid {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 60px;
+  align-items: center;
+}
+
+.root .painCopy h2 {
+  font-size: clamp(32px, 4vw, 48px);
+  margin-bottom: 16px;
+  color: var(--blue-900);
+  line-height: 1.1;
+}
+
+.root .painCopy p {
+  font-size: 18px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.painCards {
+  display: grid;
+  gap: 16px;
+}
+
+.painCard {
+  display: flex;
+  gap: 16px;
+  background: #ffffff;
+  padding: 20px 24px;
+  border-radius: 16px;
+  border: 1px solid var(--orange-500);
+  align-items: center;
+}
+
+.painIcon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  color: var(--orange-500);
+}
+
+.root .painCard p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.root .painCard strong {
+  color: var(--blue-900);
+}
+
+/* ── FEATURES ── */
+.featuresGrid {
+  display: grid;
+  gap: 20px;
+  margin-top: 32px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.card {
+  background: var(--white);
+  border: 1px solid rgba(10, 61, 142, 0.1);
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.root .card h3 {
+  font-size: 20px;
+  color: var(--blue-900);
+}
+
+.root .card p {
+  margin: 8px 0 0;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.featureCard {
+  padding: 32px 24px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border-color: rgba(10, 61, 142, 0.08);
+}
+
+.featureCard:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(10, 61, 142, 0.06);
+}
+
+.featureIcon {
+  width: 52px;
+  height: 52px;
+  background: #f4f8ff;
+  color: var(--blue-600);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.featureIcon svg {
+  width: 28px;
+  height: 28px;
+}
+
+/* ── METHOD (Como funciona) ── */
+.method {
+  background: #f4f8ff;
+}
+
+.cardsFour {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.accent {
+  background: linear-gradient(170deg, #0a3d8e 0%, #052d64 100%);
+  color: var(--white);
+}
+
+.accentNum {
+  display: inline-block;
+  font-weight: 800;
+  color: #9cc3ff;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.root .accent p,
+.root .accent h3 {
+  color: #fff;
+}
+
+/* ── BONUSES ── */
+.bonuses {
+  background: #ffffff;
+}
+
+.bonusHeader {
+  text-align: center;
+  max-width: 700px;
+  margin: 0 auto 40px;
+}
+
+.root .bonusHeader h2 {
+  font-size: clamp(32px, 4vw, 42px);
+  margin-bottom: 16px;
+}
+
+.root .bonusHeader p {
+  font-size: 18px;
+  color: var(--muted);
+}
+
+.bonusGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.bonusCard {
+  background: #f4f8ff;
+  border: 1px solid rgba(20, 85, 189, 0.1);
+  padding: 30px 24px;
+  border-radius: 16px;
+  transition: transform 0.2s;
+}
+
+.bonusCard:hover {
+  transform: translateY(-4px);
+}
+
+.bonusTag {
+  display: inline-block;
+  background: var(--orange-500);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 16px;
+}
+
+.root .bonusCard h3 {
+  font-size: 20px;
+  color: var(--blue-900);
+  margin-bottom: 10px;
+}
+
+.root .bonusCard p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+  font-size: 15px;
+}
+
+/* ── PRICING ── */
+.root .pricing h2 {
+  margin-bottom: 20px;
+}
+
+.pricingGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 22px;
+}
+
+.planCard {
+  position: relative;
+  background: #fff;
+  border: 1.5px solid rgba(10, 61, 142, 0.2);
+  border-radius: 16px;
+  padding: 24px 22px 20px;
+  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+}
+
+.planHighlight {
+  border-color: var(--orange-500);
+  border-width: 2px;
+  box-shadow: 0 16px 32px rgba(254, 121, 2, 0.12);
+  transform: translateY(-4px);
+  z-index: 2;
+}
+
+.planBadge {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  background: linear-gradient(135deg, var(--orange-500), #ff8b1e);
+  color: #fff;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(254, 121, 2, 0.3);
+}
+
+.root .planCard h3 {
+  margin: 4px 0 10px;
+  font-size: 34px;
+  color: var(--blue-900);
+}
+
+.value {
+  margin: 0;
+  font-size: 48px;
+  font-weight: 800;
+  color: #0b1a33;
+  line-height: 1;
+}
+
+.valueSub {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-left: 4px;
+}
+
+.planFeatures {
+  list-style: none;
+  padding: 0;
+  margin: 22px 0 0;
+  display: grid;
+  gap: 12px;
+  flex: 1;
+}
+
+.planFeatures li {
+  position: relative;
+  padding-left: 24px;
+  color: #233a62;
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.planFeatures li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--blue-600);
+  font-weight: 800;
+}
+
+.planBtn {
+  margin-top: 24px;
+  text-decoration: none;
+  background: var(--blue-600);
+  color: #fff;
+  text-align: center;
+  border-radius: 10px;
+  padding: 13px 16px;
+  font-weight: 800;
+  border: 0;
+  font-size: 18px;
+  transition: all 0.2s ease;
+  display: block;
+}
+
+.planBtn:hover {
+  filter: brightness(1.1);
+}
+
+.planHighlight .planBtn {
+  background: linear-gradient(135deg, var(--orange-500), #ff8b1e);
+  box-shadow: 0 8px 20px rgba(254, 121, 2, 0.28);
+}
+
+/* ── GUARANTEE ── */
+.guaranteeBox {
+  position: relative;
+  background: linear-gradient(180deg, #ffffff 0%, #f4f8ff 100%);
+  color: var(--blue-900);
+  border: 1px solid rgba(10, 61, 142, 0.15);
+  border-radius: 22px;
+  padding: 34px 30px 30px 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+  box-shadow: 0 16px 30px rgba(8, 53, 121, 0.1);
+  overflow: visible;
+}
+
+.garantiaMascote {
+  position: absolute;
+  left: -18px;
+  bottom: 0;
+  width: 270px;
+  height: auto;
+  object-fit: contain;
+  z-index: 3;
+  pointer-events: none;
+  filter: drop-shadow(0 10px 22px rgba(8, 53, 121, 0.25));
+}
+
+.garantiaSelo {
+  width: 220px;
+  height: 220px;
+  object-fit: contain;
+  filter: drop-shadow(0 14px 28px rgba(10, 61, 142, 0.2));
+}
+
+.root .guaranteeBox h2 {
+  font-size: clamp(28px, 2.5vw, 40px);
+  color: var(--blue-900);
+}
+
+.guaranteeCopy {
+  max-width: 680px;
+}
+
+.root .guaranteeBox p {
+  margin: 8px 0 0;
+  line-height: 1.6;
+  color: #46608b;
+  font-size: 17px;
+}
+
+/* ── FOOTER ── */
+.footer {
+  padding: 24px 0 42px;
+  border-top: 1px solid rgba(10, 61, 142, 0.08);
+}
+
+.root .footer p {
+  margin: 0;
+  text-align: center;
+  color: #4f5e78;
+}
+
+/* ── RESPONSIVE ── */
+@media (max-width: 1160px) {
+  .menu { display: none; }
+}
+
+@media (max-width: 980px) {
+  .heroGrid { grid-template-columns: 1fr; }
+  .heroVisual { min-height: 520px; }
+  .mascot { width: 370px !important; top: 100px !important; }
+  .heroWidget { display: none !important; }
+  .cardsFour { grid-template-columns: 1fr 1fr; }
+  .pricingGrid { grid-template-columns: 1fr 1fr; }
+  .painGrid { grid-template-columns: 1fr; gap: 40px; }
+  .guaranteeBox { padding: 34px 24px 30px; }
+  .garantiaMascote { left: -8px; bottom: 120px; width: 180px; opacity: 0.9; }
+  .garantiaSelo { width: 180px; height: 180px; }
+}
+
+@media (max-width: 620px) {
+  .menuActions .btnLink { display: none; }
+  .heroVisual { min-height: 430px; }
+  .mascot { width: 280px !important; top: 140px !important; }
+  .cardsFour { grid-template-columns: 1fr; }
+  .pricingGrid { grid-template-columns: 1fr; }
+  .planCard { min-height: auto; }
+  .garantiaMascote { width: 130px; left: -4px; bottom: 150px; }
+}

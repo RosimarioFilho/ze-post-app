@@ -1,0 +1,21 @@
+<svg width="300" height="300" viewBox="0 0 300 300" preserveAspectRatio="xMinYMin meet" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <defs>
+    <linearGradient gradientUnits="userSpaceOnUse" x1="-819.2" x2="819.2" spreadMethod="pad" gradientTransform="matrix(0.1561279296875 -0.0997161865234375 0.0928955078125 0.145416259765625 137.15 125.4)" id="gradient0">
+      <stop offset="0" stop-color="#072e66"/>
+      <stop offset="1" stop-color="#0a3d8e"/>
+    </linearGradient>
+    <linearGradient gradientUnits="userSpaceOnUse" x1="-819.2" x2="819.2" spreadMethod="pad" gradientTransform="matrix(-0.0266265869140625 0.045989990234375 -0.0518035888671875 -0.0299835205078125 254.8 179.8)" id="gradient1">
+      <stop offset="0" stop-color="#da6202"/>
+      <stop offset="1" stop-color="#fd7d07"/>
+    </linearGradient>
+    <linearGradient gradientUnits="userSpaceOnUse" x1="-819.2" x2="819.2" spreadMethod="pad" gradientTransform="matrix(-0.0630035400390625 0.0280914306640625 -0.017822265625 -0.039947509765625 212.4 234.05)" id="gradient2">
+      <stop offset="0" stop-color="#da6202"/>
+      <stop offset="1" stop-color="#fd7d07"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <path stroke="none" fill="url(#gradient0)" d="M208.1 174.6 L206.9 174.55 135.9 174.55 233.9 74.1 233.9 74.05 Q236.35 71.55 236.75 68.3 L238.25 57.3 Q239.2 50.2 234.15 45.75 230.05 41.85 223.1 41.75 L102.4 41.75 Q95.6 41.85 90.2 45.7 L90.15 45.8 90.1 45.85 Q83.85 50.4 83 57.3 L81.35 69.4 Q80.4 76.05 85 80.55 L85.45 80.95 Q89.65 84.9 96.6 84.9 L160 84.9 61.75 185.4 61.7 185.4 Q59.3 187.95 58.9 191.2 L57.4 202.2 Q56.3 209.25 61.85 215.45 66.1 219 74.3 219.25 L144.75 219.25 Q149.55 219.25 148.6 224.25 L135.65 291.5 Q134.7 296.5 129.95 296.5 L127.45 296.5 88.4 258.2 Q86.95 255.95 85.25 255.85 L45.3 255.85 Q25.25 255.85 13.1 241.7 0.95 227.55 3.85 207.5 L25.5 51.9 Q28.35 31.85 44.55 17.65 60.75 3.5 80.8 3.5 L254.7 3.5 Q274.75 3.5 286.9 17.65 299.05 31.85 296.15 51.9 L286.3 147.65 206.15 166.65 Q202.8 169.15 206.95 173.45 L208.1 174.6"/>
+    <path stroke="none" fill="url(#gradient1)" d="M208.1 174.6 L206.95 173.45 Q202.8 169.15 206.15 166.65 L286.3 147.65 276.75 239.7 275.65 240.3 Q272.75 241.4 269.3 237.85 L223.05 190.05 208.1 174.6"/>
+    <path stroke="none" fill="url(#gradient2)" d="M276.75 239.7 Q274.7 247.85 264.25 248.85 L165.5 258.2 Q160.95 258.65 160.25 255.8 159.55 252.95 161.5 251 L223.05 190.05 269.3 237.85 Q272.75 241.4 275.65 240.3 L276.75 239.7"/>
+  </g>
+</svg>
