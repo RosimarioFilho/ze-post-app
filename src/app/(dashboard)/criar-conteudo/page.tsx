@@ -94,7 +94,7 @@ function Confetti({ active }: { active: boolean }) {
     let frame: number
     let t = 0
 
-    function draw() {
+    const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       t++
       particles.forEach(p => {
