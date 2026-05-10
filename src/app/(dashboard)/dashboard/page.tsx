@@ -48,7 +48,7 @@ export default async function DashboardPage() {
         </div>
         <div className="flex gap-3">
           {isFree && (
-            <Link href="/upgrade">
+            <Link href="/assinatura/upgrade">
               <Button
                 size="sm"
                 className="bg-gradient-to-r from-ze-orange to-orange-500 hover:from-orange-500 hover:to-ze-orange text-white shadow-md hover:shadow-lg transition-all"
@@ -100,7 +100,7 @@ export default async function DashboardPage() {
                 </span>
               </div>
             </div>
-            <Link href="/upgrade" className="flex-shrink-0">
+            <Link href="/assinatura/upgrade" className="flex-shrink-0">
               <Button className="bg-gradient-to-r from-ze-orange to-orange-500 hover:from-orange-500 hover:to-ze-orange text-white shadow-md">
                 <Sparkles className="w-4 h-4" /> Assinar agora
               </Button>

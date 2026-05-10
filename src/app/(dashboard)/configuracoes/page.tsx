@@ -290,7 +290,7 @@ export default function ConfiguracoesPage() {
                 </p>
               </div>
               {company.plan !== 'pro' && (
-                <Link href="/upgrade">
+                <Link href="/assinatura/upgrade">
                   <Button variant="secondary" size="sm">Fazer upgrade PRO</Button>
                 </Link>
               )}
