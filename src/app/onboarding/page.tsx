@@ -1,11 +1,11 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Building2, Phone, Palette, CheckCircle2 } from 'lucide-react'
+import { Building2, Phone, Palette, CheckCircle2, Upload, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import type { Plan } from '@/types'
+import { NICHE_OPTIONS, type Plan } from '@/types'
 
 const STEPS = ['Empresa', 'Contato', 'Visual', 'Plano']
 
@@ -896,14 +896,30 @@ export default function OnboardingPage() {
   const [form, setForm] = useState({
     company_name: '',
     razao_social: '',
+    niche: '',
+    niche_other: '',
     phone: '',
     plan: 'starter' as Plan,
     primary_color: '#052d64',
     secondary_color: '#fe7902',
   })
+  const [logoFile, setLogoFile] = useState<File | null>(null)
+  const [logoPreview, setLogoPreview] = useState<string>('')
 
   function set(k: string) {
     return (e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
+  }
+
+  function onLogoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLogoFile(file)
+    setLogoPreview(URL.createObjectURL(file))
+  }
+
+  function clearLogo() {
+    setLogoFile(null)
+    setLogoPreview('')
   }
 
   async function finish() {
@@ -912,11 +928,14 @@ export default function OnboardingPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/login'); return }
 
+    const nicheFinal = form.niche === 'outro' ? form.niche_other.trim() : form.niche
+
     const { data: company, error: companyError } = await supabase
       .from('companies')
       .insert({
         name: form.company_name,
         razao_social: form.razao_social || null,
+        niche: nicheFinal || null,
         phone: form.phone || null,
         plan: form.plan,
         primary_color: form.primary_color,
@@ -929,6 +948,19 @@ export default function OnboardingPage() {
       console.error('Erro ao criar empresa:', companyError)
       setLoading(false)
       return
+    }
+
+    // Upload da logo (opcional) — feito após criar a empresa para usar o id no path
+    if (logoFile) {
+      const ext = logoFile.name.split('.').pop()?.toLowerCase() || 'png'
+      const path = `logos/${company.id}/logo-${Date.now()}.${ext}`
+      const { error: upErr } = await supabase.storage
+        .from('media')
+        .upload(path, logoFile, { upsert: true, contentType: logoFile.type || `image/${ext}` })
+      if (!upErr) {
+        const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(path)
+        await supabase.from('companies').update({ logo_url: publicUrl }).eq('id', company.id)
+      }
     }
 
     await supabase.from('profiles').update({
@@ -980,6 +1012,38 @@ export default function OnboardingPage() {
               </div>
               <Input id="company_name" label="Nome da empresa *" placeholder="Ex: Minha Loja" value={form.company_name} onChange={set('company_name')} required />
               <Input id="razao_social" label="Razão social" placeholder="Ex: Minha Loja LTDA" value={form.razao_social} onChange={set('razao_social')} />
+
+              <div className="flex flex-col gap-2">
+                <label htmlFor="niche" className="text-sm font-medium text-slate-700">
+                  Nicho da empresa <span className="text-ze-orange">*</span>
+                </label>
+                <select
+                  id="niche"
+                  value={form.niche}
+                  onChange={e => setForm(f => ({ ...f, niche: e.target.value }))}
+                  className="h-11 px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-ze-blue/20 focus:border-ze-blue transition"
+                  required
+                >
+                  <option value="">Selecione o segmento</option>
+                  {NICHE_OPTIONS.map(n => (
+                    <option key={n.value} value={n.value}>{n.label}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400">
+                  Os agentes de IA usam essa informação para criar conteúdos mais assertivos para o seu mercado.
+                </p>
+              </div>
+
+              {form.niche === 'outro' && (
+                <Input
+                  id="niche_other"
+                  label="Qual o seu nicho?"
+                  placeholder="Ex: Cooperativa de crédito"
+                  value={form.niche_other}
+                  onChange={set('niche_other')}
+                  required
+                />
+              )}
             </div>
           )}
 
@@ -1001,7 +1065,45 @@ export default function OnboardingPage() {
                 <Palette className="w-6 h-6 text-ze-blue" />
                 <h2 className="text-xl font-black text-slate-900">Identidade visual</h2>
               </div>
-              <p className="text-sm text-slate-500">Escolha as cores da sua marca. Os agentes usarão essas cores para criar todas as artes.</p>
+              <p className="text-sm text-slate-500">Escolha as cores e, se quiser, já envie sua logo. Tudo isso será usado pelos agentes para criar artes consistentes com a sua marca.</p>
+
+              {/* Logo upload (opcional) */}
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Logomarca <span className="text-slate-400 font-normal">(opcional — pode enviar depois)</span>
+                </label>
+                {logoPreview ? (
+                  <div className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-slate-50">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={logoPreview} alt="Preview da logo" className="w-16 h-16 object-contain rounded-lg bg-white border border-slate-100" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-slate-900 truncate">{logoFile?.name}</p>
+                      <p className="text-xs text-slate-400">{logoFile && (logoFile.size / 1024).toFixed(0)} KB</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearLogo}
+                      className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition"
+                      aria-label="Remover logo"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center gap-2 p-6 rounded-xl border-2 border-dashed border-slate-200 hover:border-ze-blue hover:bg-ze-blue/5 cursor-pointer transition">
+                    <Upload className="w-5 h-5 text-slate-400" />
+                    <span className="text-sm text-slate-600 font-medium">Clique para enviar a logo</span>
+                    <span className="text-xs text-slate-400">PNG, JPG ou SVG · até 2 MB</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={onLogoChange}
+                    />
+                  </label>
+                )}
+              </div>
+
               <div className="flex gap-6">
                 <div className="flex flex-col gap-2 flex-1">
                   <label className="text-sm font-medium text-slate-700">Cor primária</label>
@@ -1079,7 +1181,13 @@ export default function OnboardingPage() {
             {step < STEPS.length - 1 ? (
               <Button
                 onClick={() => setStep(s => s + 1)}
-                disabled={step === 0 && !form.company_name}
+                disabled={
+                  step === 0 && (
+                    !form.company_name ||
+                    !form.niche ||
+                    (form.niche === 'outro' && !form.niche_other.trim())
+                  )
+                }
                 className="flex-1"
               >
                 Próximo

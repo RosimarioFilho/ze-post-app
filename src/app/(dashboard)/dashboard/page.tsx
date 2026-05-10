@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { Settings, Plus, Users, Clock, FileText, Calendar } from 'lucide-react'
+import { Settings, Plus, Users, Clock, FileText, Calendar, Crown, Sparkles, CheckCircle2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -21,6 +21,7 @@ export default async function DashboardPage() {
 
   const companyId = profile?.company_id
   const firstName = (profile?.full_name ?? 'Usuário').split(' ')[0]
+  const isFree = profile?.company?.plan !== 'pro'
 
   const [squadRes, pendingRes, publishedRes, scheduledRes, recentRes] = await Promise.all([
     supabase.from('squad_members').select('id', { count: 'exact', head: true }).eq('company_id', companyId).eq('is_active', true),
@@ -46,6 +47,16 @@ export default async function DashboardPage() {
           <p className="text-slate-500 text-sm mt-0.5">Tudo pronto para você criar e publicar.</p>
         </div>
         <div className="flex gap-3">
+          {isFree && (
+            <Link href="/upgrade">
+              <Button
+                size="sm"
+                className="bg-gradient-to-r from-ze-orange to-orange-500 hover:from-orange-500 hover:to-ze-orange text-white shadow-md hover:shadow-lg transition-all"
+              >
+                <Crown className="w-4 h-4" /> Assinar PRO
+              </Button>
+            </Link>
+          )}
           <Link href="/configuracoes">
             <Button variant="outline" size="sm">
               <Settings className="w-4 h-4" /> Configurações
@@ -58,6 +69,46 @@ export default async function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      {/* Upgrade banner — só Free */}
+      {isFree && (
+        <div className="mb-7 rounded-2xl p-6 relative overflow-hidden border border-orange-200"
+             style={{ background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 60%, #fed7aa 100%)' }}>
+          <div className="flex items-center gap-5 relative z-10">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-ze-orange to-orange-500 flex items-center justify-center shadow-lg flex-shrink-0">
+              <Crown className="w-7 h-7 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-ze-orange text-white px-2 py-0.5 rounded-full">
+                  Plano Free
+                </span>
+                <span className="text-xs font-semibold text-orange-700">Você está usando o plano gratuito</span>
+              </div>
+              <h3 className="font-black text-slate-900 text-lg leading-tight">
+                Desbloqueie todo o poder do Zé Post com o plano <span className="text-ze-orange">PRO</span>
+              </h3>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+                <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-700">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> Conteúdos ilimitados
+                </span>
+                <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-700">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> Todas as redes sociais
+                </span>
+                <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-700">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> Squad completo + agendamento
+                </span>
+              </div>
+            </div>
+            <Link href="/upgrade" className="flex-shrink-0">
+              <Button className="bg-gradient-to-r from-ze-orange to-orange-500 hover:from-orange-500 hover:to-ze-orange text-white shadow-md">
+                <Sparkles className="w-4 h-4" /> Assinar agora
+              </Button>
+            </Link>
+          </div>
+          <Crown className="absolute -right-4 -top-4 w-32 h-32 text-ze-orange opacity-5 rotate-12 pointer-events-none" />
+        </div>
+      )}
 
       {/* Banner Zé */}
       <div className="rounded-2xl bg-ze-blue p-7 mb-7 flex items-center justify-between overflow-hidden relative">

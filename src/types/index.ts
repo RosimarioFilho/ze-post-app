@@ -36,12 +36,30 @@ export interface Company {
   razao_social?: string
   phone?: string
   logo_url?: string
+  niche?: string
   primary_color: string
   secondary_color: string
   plan: Plan
   created_at: string
   updated_at: string
 }
+
+export const NICHE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'padaria', label: 'Padaria / Confeitaria' },
+  { value: 'restaurante', label: 'Restaurante / Lanchonete' },
+  { value: 'provedor_internet', label: 'Provedor de Internet' },
+  { value: 'concessionaria', label: 'Concessionária / Veículos' },
+  { value: 'moda', label: 'Moda / Vestuário' },
+  { value: 'beleza', label: 'Beleza / Estética' },
+  { value: 'academia', label: 'Academia / Saúde' },
+  { value: 'imobiliaria', label: 'Imobiliária' },
+  { value: 'educacao', label: 'Educação / Cursos' },
+  { value: 'petshop', label: 'Pet Shop / Veterinária' },
+  { value: 'tecnologia', label: 'Tecnologia / Software' },
+  { value: 'ecommerce', label: 'E-commerce' },
+  { value: 'servicos', label: 'Serviços em geral' },
+  { value: 'outro', label: 'Outro' },
+]
 
 export interface Profile {
   id: string
