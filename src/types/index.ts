@@ -170,3 +170,97 @@ export const STATUS_LABELS: Record<ContentStatus, { label: string; color: string
   publicado: { label: 'Publicado', color: 'bg-emerald-100 text-emerald-700' },
   rejeitado: { label: 'Rejeitado', color: 'bg-red-100 text-red-700' },
 }
+
+// ── Studio IA ────────────────────────────────────────────────
+
+export type CreativeJobStatus =
+  | 'pending'
+  | 'bg_removing'
+  | 'analyzing'
+  | 'palette_extracting'
+  | 'strategizing'
+  | 'copywriting'
+  | 'art_directing'
+  | 'designing'
+  | 'rendering'
+  | 'critiquing'
+  | 'correcting'
+  | 'done'
+  | 'failed'
+
+export interface CreativeJob {
+  id: string
+  company_id: string
+  created_by?: string
+  content_type: string
+  briefing: string
+  product_image_url?: string
+  product_image_nobg_url?: string
+  status: CreativeJobStatus
+  current_agent?: string
+  progress_pct: number
+  vision_analysis?: Record<string, unknown>
+  palette?: Record<string, string>
+  strategy?: Record<string, string>
+  copy_output?: { headline: string; subline: string; cta: string; caption: string }
+  art_direction?: Record<string, unknown>
+  designer_html?: string
+  rendered_png_url?: string
+  critique?: {
+    score: number
+    passed: boolean
+    issues: Array<{ rule: string; severity: 'high' | 'medium' | 'low'; suggestion: string }>
+    praise?: string[]
+  }
+  correction_attempts: number
+  final_html?: string
+  final_png_url?: string
+  content_id?: string
+  error_message?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface BrandKit {
+  id: string
+  company_id: string
+  primary_font: string
+  secondary_font: string
+  accent_color?: string
+  tone_of_voice: string
+  preferred_styles: string[]
+  rejected_styles: string[]
+  preferred_ctas: string[]
+  approved_art_examples: string[]
+  rejected_art_examples: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface DesignTemplate {
+  id: string
+  name: string
+  category: string
+  compatible_formats: string[]
+  description: string
+  html_skeleton: string
+  preview_url?: string
+  is_active: boolean
+  created_at: string
+}
+
+export const CREATIVE_JOB_STATUS_LABELS: Record<CreativeJobStatus, { label: string; emoji: string }> = {
+  pending:            { label: 'Aguardando início', emoji: '⏳' },
+  bg_removing:        { label: 'Removendo background...', emoji: '✂️' },
+  analyzing:          { label: 'Analisando imagem...', emoji: '🔍' },
+  palette_extracting: { label: 'Extraindo paleta de cores...', emoji: '🎨' },
+  strategizing:       { label: 'Criando estratégia...', emoji: '🧠' },
+  copywriting:        { label: 'Escrevendo textos...', emoji: '✍️' },
+  art_directing:      { label: 'Definindo direção de arte...', emoji: '🎬' },
+  designing:          { label: 'Desenhando o layout...', emoji: '💻' },
+  rendering:          { label: 'Renderizando imagem...', emoji: '🖼️' },
+  critiquing:         { label: 'Validando qualidade visual...', emoji: '🧐' },
+  correcting:         { label: 'Aplicando correções automáticas...', emoji: '🔧' },
+  done:               { label: 'Arte pronta!', emoji: '✅' },
+  failed:             { label: 'Erro no processo', emoji: '❌' },
+}

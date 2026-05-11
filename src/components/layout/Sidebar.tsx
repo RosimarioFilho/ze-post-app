@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, Plus, FileText, CheckCircle, Calendar,
-  Users, Video, Share2, Settings, LogOut, ChevronDown, ChevronUp, Send,
+  Users, Video, Share2, Settings, LogOut, ChevronDown, ChevronUp, Send, Wand2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
@@ -13,6 +13,7 @@ import type { Profile } from '@/types'
 const NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/criar-conteudo', label: 'Criar conteúdo', icon: Plus },
+  { href: '/studio', label: 'Studio IA', icon: Wand2 },
   { href: '/conteudos', label: 'Conteúdos', icon: FileText },
   { href: '/aprovacoes', label: 'Aprovações', icon: CheckCircle },
   { href: '/publicacoes', label: 'Publicações', icon: Send },

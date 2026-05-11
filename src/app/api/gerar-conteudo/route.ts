@@ -1,32 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@/lib/supabase/server'
-import fs from 'fs'
-import path from 'path'
-
-function readApiKey(): string {
-  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY
-  // Fallback: read directly from .env.local (bypasses Turbopack env injection issues)
-  for (const dir of [process.cwd(), path.join(process.cwd(), '..'), path.join(process.cwd(), '..', '..', '..', '..')]) {
-    try {
-      const content = fs.readFileSync(path.join(dir, '.env.local'), 'utf-8')
-      const match = content.match(/^ANTHROPIC_API_KEY=(.+)$/m)
-      if (match?.[1]?.trim()) return match[1].trim()
-    } catch {}
-  }
-  return ''
-}
-
-const AR_SIZES: Record<string, [number, number]> = {
-  post_instagram: [1080, 1080],
-  post_facebook: [1080, 566],
-  post_linkedin_imagem: [1200, 627],
-  post_linkedin_texto: [1080, 1080],
-  stories: [1080, 1920],
-  carrossel: [1080, 1080],
-  youtube: [1280, 720],
-  reels: [1080, 1920],
-}
+import { readApiKey, AR_SIZES, extractHtml, enforceProductImage, buildLayoutDimensions, buildLayoutGuide } from '@/lib/art-utils'
 
 const FALLBACK_PROMPTS: Record<string, string> = {
   estrategista: `Você é Ana, Estrategista de Conteúdo. Analise o briefing e defina em até 3 linhas: tom de voz ideal, abordagem estratégica e gancho principal de atenção. Seja concisa e direta.`,
@@ -55,42 +30,6 @@ function replaceVars(prompt: string, vars: Record<string, string>): string {
     .replace(/\{\{logo_url\}\}/g, vars.logo_url)
 }
 
-function extractHtml(text: string): string {
-  const fenced = text.match(/```html\n?([\s\S]*?)```/i)
-  if (fenced) return fenced[1].trim()
-  const full = text.match(/<(!DOCTYPE html|html)[\s\S]*<\/html>/i)
-  if (full) return full[0].trim()
-  const div = text.match(/<(div|section|article|main)[^>]*>[\s\S]*<\/\1>/i)
-  if (div) return div[0].trim()
-  return text.trim()
-}
-
-// Rede de segurança NUCLEAR: substitui TODAS as URLs de stock photos em QUALQUER
-// contexto do HTML (src="", background-image: url(), url() em CSS inline)
-// pela URL do produto do cliente. Se nenhuma URL de stock for encontrada, injeta
-// a imagem centralizada. Opera em qualquer formato que a IA possa usar.
-function enforceProductImage(html: string, productUrl: string): string {
-  if (!html || !productUrl) return html
-  if (html.includes(productUrl)) return html
-
-  // Regex que captura qualquer URL de stock photo em qualquer contexto
-  // Cobre: unsplash.com, pexels.com, pixabay.com, shutterstock.com, istockphoto.com
-  const STOCK_RE = /https?:\/\/(?:images\.unsplash\.com|cdn\.unsplash\.com|[^\s"')>]*unsplash\.com|[^\s"')>]*pexels\.com|[^\s"')>]*pixabay\.com|[^\s"')>]*shutterstock\.com|[^\s"')>]*istockphoto\.com)[^\s"')>]*/gi
-
-  let modified = html.replace(STOCK_RE, productUrl)
-
-  console.log('[enforceProductImage] stockUrlsReplaced:', modified !== html, '| productUrlPresent:', modified.includes(productUrl))
-
-  // Se após substituir ainda não tem a URL (IA usou outro formato/estratégia), injeta
-  // height:65% do body = tamanho grande garantido independente do formato
-  if (!modified.includes(productUrl)) {
-    const inject = `<img src="${productUrl}" alt="produto" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);height:65%;max-width:88%;object-fit:contain;filter:drop-shadow(0 40px 80px rgba(0,0,0,0.5));z-index:4">`
-    modified = modified.includes('</body>')
-      ? modified.replace('</body>', `${inject}\n</body>`)
-      : modified + inject
-  }
-  return modified
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -183,65 +122,8 @@ export async function POST(req: NextRequest) {
         return visualMatch ? visualMatch[1].trim() : copy.slice(0, 200)
       })()
 
-      // ━━━ FORMAT TYPE ━━━
-      const isVertical   = H / W >= 1.4   // stories, reels (9:16)
-      const isSquare     = Math.abs(H / W - 1) < 0.1  // posts quadrados (1:1)
-      const isHorizontal = W / H >= 1.5   // youtube, facebook (16:9, 1.91:1)
-
-      // Tamanhos proporcionais — usa o lado MENOR como base para legibilidade
-      const base = Math.min(W, H)
-      const headlinePx  = Math.round(base / (isVertical ? 8.5 : isHorizontal ? 9.5 : 8))
-      const sublinePx   = Math.round(base / 22)
-      const priceBigPx  = Math.round(base / 7)        // preço grande estilo refs
-      const ctaPx       = Math.round(base / 26)
-      const logoPx      = Math.round(base / 50)
-      const PAD         = Math.round(base * 0.06)
-      const GAP         = Math.round(base * 0.025)
-
-      // ━━━ LAYOUT ESPECÍFICO POR FORMATO — valores em pixels EXATOS ━━━
-      // REGRA CARDINAL: produto sempre com height em PIXELS ABSOLUTOS (não %)
-      // para evitar que a IA reduza o tamanho aplicando % relativo ao elemento pai.
-      const productHeightPx = isVertical
-        ? Math.round(H * 0.54)   // stories: ~1037px de 1920 — produto domina
-        : isSquare
-        ? Math.round(H * 0.68)   // square: ~734px de 1080 — produto grande
-        : Math.round(H * 0.86)   // horizontal: ~619px de 720 — produto quase full height
-
-      const layoutGuide = isVertical
-        ? `FORMATO STORIES/REELS (${W}×${H}px):
-LAYOUT EM 3 ZONAS — tudo position:absolute no body:
-- TOPO (top:0; height:${Math.round(H*0.20)}px): logo empresa + headline
-- PRODUTO — DOMINANTE E CENTRALIZADO (z-index:3):
-  position:absolute; left:50%; top:48%; transform:translate(-50%,-50%);
-  height:${productHeightPx}px; ← USE ESTE VALOR EXATO EM PIXELS
-  max-width:92%; object-fit:contain;
-  filter:drop-shadow(0 40px 80px rgba(0,0,0,0.45));
-  O produto deve ser o elemento VISUALMENTE DOMINANTE — NUNCA reduzir abaixo de ${productHeightPx}px
-- BASE (bottom:0; height:${Math.round(H*0.24)}px; z-index:5): subline + oferta + CTA footer
-  • Preço destaque: font-size:${priceBigPx}px weight 900
-  • Footer CTA: background cor sólida, height:${Math.round(H * 0.07)}px`
-        : isSquare
-        ? `FORMATO QUADRADO (${W}×${H}px):
-LAYOUT A — Hero centralizado (para produtos PNG/fundo limpo):
-  PRODUTO: position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-  height:${productHeightPx}px; ← USE ESTE VALOR EXATO EM PIXELS
-  max-width:82%; object-fit:contain;
-  filter:drop-shadow(0 30px 70px rgba(0,0,0,0.4));
-  Logo: top-left | Tag: top-right
-  Headline: acima OU abaixo do produto (NUNCA sobre ele)
-  Badge preço + footer CTA na zona inferior (bottom:0 to ${Math.round(H*0.22)}px)
-LAYOUT B — Split (produto dir | texto esq):
-  PRODUTO: position:absolute; right:${Math.round(W*0.02)}px; top:50%; transform:translateY(-50%);
-  height:${productHeightPx}px; width:${Math.round(W*0.52)}px; object-fit:contain;
-  Texto zona esquerda: left:${PAD}px; width:${Math.round(W*0.44)}px`
-        : `FORMATO HORIZONTAL (${W}×${H}px):
-LAYOUT SPLIT texto-esq | produto-dir:
-PRODUTO: position:absolute; right:${Math.round(W*0.01)}px; top:50%; transform:translateY(-50%);
-  height:${productHeightPx}px; ← USE ESTE VALOR EXATO EM PIXELS
-  max-width:54%; object-fit:contain;
-  filter:drop-shadow(0 25px 60px rgba(0,0,0,0.4));
-Texto zona esquerda (width:${Math.round(W*0.44)}px; left:${PAD}px):
-  logo topo, headline ${headlinePx}px, subline, preço ${priceBigPx}px, footer CTA`
+      const { isVertical, isSquare, isHorizontal, headlinePx, sublinePx, priceBigPx, ctaPx, logoPx, PAD, GAP, productHeightPx } = buildLayoutDimensions(tipo, W, H)
+      const layoutGuide = buildLayoutGuide(tipo, W, H)
 
       // ━━━ PROMPT DA DESIGNER (curto e direto) ━━━
       const designerTextPrompt = refImagemUrl

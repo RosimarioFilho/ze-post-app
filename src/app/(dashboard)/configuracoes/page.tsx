@@ -298,6 +298,26 @@ export default function ConfiguracoesPage() {
           </CardContent>
         </Card>
 
+        {/* Brand Kit */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2 font-bold text-slate-900">
+              <Palette className="w-4 h-4 text-ze-orange" /> Brand Kit
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-bold text-slate-900">Identidade de marca avançada</p>
+                <p className="text-sm text-slate-500 mt-0.5">Fontes, tom de voz, estilos e CTAs preferidos usados pelos agentes do Studio IA</p>
+              </div>
+              <Link href="/configuracoes/brand-kit">
+                <Button variant="secondary" size="sm">Configurar Brand Kit</Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+
         <Button onClick={save} loading={saving} className="self-end">
           <Save className="w-4 h-4" />
           {saved ? 'Salvo!' : 'Salvar alterações'}
