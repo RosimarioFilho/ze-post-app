@@ -1,8 +1,147 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@/lib/supabase/server'
+import { NICHE_OPTIONS } from '@/types'
 import fs from 'fs'
 import path from 'path'
+
+// ─── Niche-aware guidance ───────────────────────────────────────────────
+// Cada nicho ganha (1) label legível, (2) tom de voz, (3) palette/visual,
+// (4) referencias e (5) hashtags base. Os agentes usam isso para gerar
+// conteudo verdadeiramente adaptado ao segmento do cliente.
+interface NicheGuide {
+  label: string
+  tomVoz: string
+  visualHints: string
+  referencias: string
+  hashtags: string
+  copyFocus: string
+}
+
+const NICHE_GUIDES: Record<string, NicheGuide> = {
+  padaria: {
+    label: 'Padaria / Confeitaria',
+    tomVoz: 'Acolhedor, afetivo e caseiro. Ressalta frescor, tradição e o cheirinho de pão quente. Use linguagem coloquial brasileira.',
+    visualHints: 'Tons quentes (marrom-pão, dourado, vermelho-cereja). Texturas rústicas. Foto cheia de produto com close-up apetitoso. Elementos de farinha, trigo, vapor.',
+    referencias: 'Padarias artesanais, confeitarias francesas, bistrôs. Estilo "aconchegante e fresquinho".',
+    hashtags: '#padaria #paofresco #confeitaria #cafedamanha #docescaseiros',
+    copyFocus: 'Frescor diário, sabor caseiro, momentos em família, café da manhã, lanche da tarde.',
+  },
+  restaurante: {
+    label: 'Restaurante / Lanchonete',
+    tomVoz: 'Apetitoso, descontraído e descritivo. Faz "água na boca". Convida para a experiência gastronômica.',
+    visualHints: 'Food photography vibrante, fundo escuro ou madeira. Vapor, gotas, ingredientes ao redor. Cores saturadas que valorizem o prato (vermelho, mostarda, verde-erva).',
+    referencias: 'iFood, Outback, hamburguerias artesanais, food trucks gourmet.',
+    hashtags: '#gastronomia #foodporn #delicia #restaurante #cardapio',
+    copyFocus: 'Sabor irresistível, ingredientes selecionados, experiência única, peça já, delivery.',
+  },
+  provedor_internet: {
+    label: 'Provedor de Internet',
+    tomVoz: 'Direto, técnico-acessível e confiável. Foco em velocidade, estabilidade e atendimento local. Tom de "vizinho que entende de tecnologia".',
+    visualHints: 'Cores frias e tecnológicas (azul, ciano, roxo elétrico). Elementos de wifi, fibra óptica, velocímetro, ícones de streaming. Background limpo e moderno.',
+    referencias: 'Vivo Fibra, Claro Net, provedores regionais. Estilo techwave/futurista.',
+    hashtags: '#internetfibra #altavelocidade #provedorlocal #wifi #tecnologia',
+    copyFocus: 'Velocidade em mega/giga, estabilidade, instalação grátis, sem fidelidade, atendimento 24h.',
+  },
+  concessionaria: {
+    label: 'Concessionária / Veículos',
+    tomVoz: 'Aspiracional, premium e confiante. Vende sonho de liberdade, status e desempenho. Tom executivo.',
+    visualHints: 'Fundo dramático (asfalto, garagem, pôr-do-sol). Veículo em ângulo 3/4 com iluminação cinematográfica. Cores metálicas, contraste alto, tipografia bold.',
+    referencias: 'Jeep, Fiat, Volkswagen, BMW. Comerciais de TV automotivos.',
+    hashtags: '#carros #veiculos #concessionaria #novomodelo #condicaoespecial',
+    copyFocus: 'Parcelas, taxa zero, test-drive grátis, lançamento, ano novo zero km, retomada do seu seminovo.',
+  },
+  moda: {
+    label: 'Moda / Vestuário',
+    tomVoz: 'Estiloso, atual e inspirador. Linguagem de tendência, aspiracional. Fala de identidade pessoal através das peças.',
+    visualHints: 'Editorial fashion, fundos limpos ou texturizados. Modelos posando ou flatlays. Paleta neutra (off-white, nude, preto) ou vibrante conforme coleção.',
+    referencias: 'Zara, Renner, C&A, lojas de boutique. Estilo Instagram fashion.',
+    hashtags: '#moda #lookdodia #tendencia #estilo #colecao',
+    copyFocus: 'Nova coleção, look completo, tendência da estação, frete grátis, parcelado, peças exclusivas.',
+  },
+  beleza: {
+    label: 'Beleza / Estética',
+    tomVoz: 'Empoderador, gentil e sensorial. Promove autocuidado, confiança e transformação. Linguagem feminina mas inclusiva.',
+    visualHints: 'Tons rosa, dourado, lilás, branco. Texturas suaves (mármore, veludo). Antes/depois, close em produtos, gestos delicados. Iluminação suave.',
+    referencias: 'Sephora, O Boticário, Quem Disse Berenice, salões premium.',
+    hashtags: '#beleza #autocuidado #skincare #esteticafacial #procedimentos',
+    copyFocus: 'Procedimento, agende seu horário, resultado real, autoestima, combo promocional, dia da beleza.',
+  },
+  academia: {
+    label: 'Academia / Saúde',
+    tomVoz: 'Motivador, energético e direto. Linguagem de superação. Equilibra performance e bem-estar.',
+    visualHints: 'Cores vibrantes (laranja, vermelho, preto). Atletas em ação, equipamentos, suor. Tipografia bold/condensada. Composição dinâmica.',
+    referencias: 'Smart Fit, Bodytech, CrossFit boxes. Estilo "no pain no gain".',
+    hashtags: '#academia #treino #vidasaudavel #fitness #motivacao',
+    copyFocus: 'Matrícula grátis, plano anual, primeira aula experimental, transformação, comunidade.',
+  },
+  imobiliaria: {
+    label: 'Imobiliária',
+    tomVoz: 'Aspiracional e consultivo. Fala de realização do sonho da casa própria. Gera confiança e segurança.',
+    visualHints: 'Fotos arquitetônicas (fachada, sala iluminada, vista). Cores neutras (bege, cinza, verde sálvia). Plantas baixas, ícones de ambientes.',
+    referencias: 'Loft, QuintoAndar, imobiliárias de luxo. Estilo arquitetural premium.',
+    hashtags: '#imovel #casanova #apartamento #imobiliaria #realizandosonhos',
+    copyFocus: 'M², dormitórios, financiamento, entrada facilitada, pronto para morar, FGTS.',
+  },
+  educacao: {
+    label: 'Educação / Cursos',
+    tomVoz: 'Inspirador, didático e acessível. Promove transformação pela aprendizagem. Combate impostor syndrome.',
+    visualHints: 'Cores vivas (azul-escola, amarelo, verde). Ilustrações flat, ícones de livros/diploma. Foto de alunos sorridentes ou estúdio de gravação.',
+    referencias: 'Hotmart, Alura, Hashtag Treinamentos, escolas de idiomas.',
+    hashtags: '#cursoonline #educacao #aprenderemcasa #certificado #transformacao',
+    copyFocus: 'Certificado reconhecido, aulas práticas, carreira, depoimentos de alunos, último dia de inscrição.',
+  },
+  petshop: {
+    label: 'Pet Shop / Veterinária',
+    tomVoz: 'Carinhoso, leve e divertido. Trata pets como família. Combina humor com cuidado responsável.',
+    visualHints: 'Cores pastel (azul-bebê, rosa, amarelo). Pets fofos como protagonistas. Patinhas, ossinhos, brinquedos como decoração.',
+    referencias: 'Cobasi, Petz, lojas independentes de bairro.',
+    hashtags: '#petshop #amopets #cachorro #gato #petsdoinsta',
+    copyFocus: 'Banho e tosa, ração premium, brinquedos novos, vacinação, agendamento veterinário.',
+  },
+  tecnologia: {
+    label: 'Tecnologia / Software',
+    tomVoz: 'Inovador, técnico-acessível e visionário. Foco em eficiência, automação e ROI.',
+    visualHints: 'Paleta tech (azul-elétrico, roxo, neon). Gradientes futuristas, glassmorphism, dashboards, ícones minimalistas. Fundo escuro.',
+    referencias: 'Stripe, Linear, Notion, Vercel. Estilo SaaS premium.',
+    hashtags: '#tecnologia #software #automacao #saas #inovacao',
+    copyFocus: 'Aumento de produtividade, integrações, free trial, demo gratuita, automação, IA.',
+  },
+  ecommerce: {
+    label: 'E-commerce',
+    tomVoz: 'Direto ao ponto, urgente e persuasivo. Foca em oferta, prazo e benefício prático.',
+    visualHints: 'Produto em destaque com fundo branco/contrastante. Selo de oferta, "frete grátis", percentual em vermelho/amarelo. Composição agressiva e vendedora.',
+    referencias: 'Shopee, Mercado Livre, Magalu. Estilo "queima de estoque".',
+    hashtags: '#promocao #ofertaimperdivel #fretegratis #ecommerce #compraonline',
+    copyFocus: 'Desconto, frete grátis, últimas unidades, parcelado em 12x, cupom, black friday.',
+  },
+  servicos: {
+    label: 'Serviços em geral',
+    tomVoz: 'Profissional, confiável e prático. Demonstra expertise e disponibilidade.',
+    visualHints: 'Paleta sóbria mas acolhedora. Foto do profissional em ação ou cliente satisfeito. Ícones de check, agenda, telefone.',
+    referencias: 'GetNinjas, profissionais autônomos, consultorias.',
+    hashtags: '#servicos #profissional #orcamentogratis #qualidade',
+    copyFocus: 'Orçamento sem compromisso, atendimento rápido, garantia, anos de experiência, depoimentos.',
+  },
+}
+
+function getNicheGuide(niche?: string | null): NicheGuide | null {
+  if (!niche) return null
+  // Match direto pelo value
+  if (NICHE_GUIDES[niche]) return NICHE_GUIDES[niche]
+  // Match pelo label exato (caso onboarding antigo tenha salvo o label)
+  const byLabel = NICHE_OPTIONS.find(o => o.label === niche)
+  if (byLabel && NICHE_GUIDES[byLabel.value]) return NICHE_GUIDES[byLabel.value]
+  // Nicho livre ("Outro" — texto digitado) — retorna guide genérico com o texto
+  return {
+    label: niche,
+    tomVoz: `Adapte o tom de voz ao segmento "${niche}". Pesquise o vocabulário típico, dores e desejos desse mercado.`,
+    visualHints: `Use referencias visuais condizentes com "${niche}".`,
+    referencias: `Marcas e canais de referencia em "${niche}".`,
+    hashtags: `Hashtags do nicho "${niche}".`,
+    copyFocus: `Foque nas dores e desejos especificos de quem atua/consome em "${niche}".`,
+  }
+}
 
 function readApiKey(): string {
   if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY
