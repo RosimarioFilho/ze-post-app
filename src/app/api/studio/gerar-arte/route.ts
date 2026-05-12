@@ -536,13 +536,15 @@ REGRAS ABSOLUTAS (violá-las invalida o trabalho):
 1. O PRODUTO É O HERÓI. Ele ocupa o espaço visual dominante. NUNCA miniaturize o produto.
 2. CONTRASTE OBRIGATÓRIO. Fundo deve contrastar fortemente com o produto. Produto claro? Fundo escuro. Produto colorido? Fundo neutro escuro.
 3. SOMBRA PROFUNDA. Produto com fundo removido SEMPRE recebe drop-shadow multicamadas para flutuar.
-4. TEXTO EM ZONA SEPARADA. Headline, subline e CTA ficam em áreas que NÃO se sobrepõem ao produto.
+4. TEXTO EM ZONA SEPARADA. Headline, subline e CTA ficam em áreas que NÃO se sobrepõem ao produto NEM a badges/preços. Cada zona de texto é exclusiva.
 5. HIERARQUIA VISUAL. Tamanhos de fonte seguem razão áurea: headline → subline → CTA → legenda (1 : 0.6 : 0.45 : 0.35).
 6. CTA DESTACADO. Botão com padding generoso, cor acento de alto contraste, uppercase + letter-spacing.
 7. DECORAÇÃO MÍNIMA. Máx 2 elementos decorativos, opacity 0.08–0.18. Menos é mais.
 8. FONTE PREMIUM. @import ${primaryFont} do Google Fonts. Headline peso 900, sem serifas.
 9. URL DO PRODUTO SAGRADA. A URL fornecida vai no src do img. Jamais substitua por outra imagem.
-10. HTML COMPLETO. position:absolute em tudo. body: width:${W}px; height:${H}px; overflow:hidden; position:relative; margin:0; padding:0.`
+10. HTML COMPLETO. position:absolute em tudo. body: width:${W}px; height:${H}px; overflow:hidden; position:relative; margin:0; padding:0.
+11. TEXTO NUNCA CORTADO. TODA div/p/h1/span de texto DEVE ter: max-width:${W - 2 * PAD}px; word-wrap:break-word; overflow-wrap:break-word; box-sizing:border-box. Nunca use white-space:nowrap em headlines. Texto que ultrapassa a borda do canvas é FALHA CRÍTICA.
+12. ZONAS SEM SOBREPOSIÇÃO. Calcule as coordenadas top/left/width/height de cada elemento e certifique-se de que os bounding boxes de headline, subline, CTA e badge NÃO se sobrepõem entre si. Se houver badge de preço, posicione-o em canto oposto à headline.`
 
     // Buscar imagem contextual Unsplash quando não há produto
     const contextualImageUrl = productImageUrl ? null : await searchContextualUnsplashImage(briefing, niche)
@@ -572,13 +574,15 @@ TIPOGRAFIA — @import url('https://fonts.googleapis.com/css2?family=${primaryFo
 • Preço/destaque: ${priceBigPx}px | weight:900 | cor acento
 • CTA: ${ctaPx}px | weight:700 | uppercase | letter-spacing:0.06em
 
-CHECKLIST FINAL antes de entregar:
-□ <img src="${productImageUrl}"> está no HTML?
-□ O produto é o maior elemento visual?
-□ Nenhum texto está sobre o produto?
-□ O fundo contrasta com o produto?
-□ O botão CTA tem cor de alto contraste?
-□ HTML tem width:${W}px e height:${H}px?
+CHECKLIST FINAL — responda mentalmente SIM para cada item antes de entregar:
+□ <img src="${productImageUrl}"> está no HTML com a URL exata?
+□ O produto é o maior elemento visual (ocupa >60% da área)?
+□ Cada div/p/h1 de texto tem max-width:${W - 2 * PAD}px e word-wrap:break-word?
+□ Nenhuma palavra da headline, subline ou CTA está cortada pela borda do canvas?
+□ O badge de preço (se houver) está em canto OPOSTO à headline, sem sobreposição?
+□ Nenhum texto se sobrepõe a nenhum outro texto ou badge?
+□ O fundo contrasta fortemente com o produto?
+□ HTML tem width:${W}px e height:${H}px exatos?
 
 Entregue APENAS o bloco \`\`\`html ... \`\`\`. Zero texto fora do bloco.`
       : `═══ CRIATIVO ${W}×${H}px | ${isVertical ? 'STORIES/REELS' : isSquare ? 'POST QUADRADO' : 'HORIZONTAL'} ═══
@@ -694,23 +698,27 @@ Entregue APENAS o bloco \`\`\`html ... \`\`\`.`
   "praise": ["pontos positivos concretos"]
 }
 
-RUBRICA DE AVALIAÇÃO (cada critério vale 1 ponto, exceto ★★ que vale 2):
+RUBRICA DE AVALIAÇÃO (cada critério vale 1 ponto, exceto ★★ que vale 2 e ✖ que é ELIMINATÓRIO):
+
+✖ [TEXTO_CORTADO] Examine CUIDADOSAMENTE cada palavra da headline, subline e CTA. Se QUALQUER palavra estiver cortada pela borda do canvas (letra faltando, texto saindo da imagem), isso é ELIMINATÓRIO: score máximo = 5, passed = false, severity = "high". Isso inclui texto parcialmente visível em qualquer borda.
+
+✖ [SOBREPOSICAO_TEXTO] Headline, subline, CTA e badges de preço/destaque NÃO podem se sobrepor uns aos outros. Texto em cima de texto = ELIMINATÓRIO: score máximo = 5, passed = false, severity = "high".
 
 ★★ [PRODUTO_DOMINANTE] O produto ocupa ≥60% do espaço visual e é o primeiro elemento que o olho percebe. Se o produto estiver pequeno, lateral, ou competindo com texto, desconte 2 pontos. (severity: high se falhar)
 
 ★★ [CONTRASTE_FUNDO_PRODUTO] O fundo contrasta fortemente com o produto — eles NÃO se "fundem". Fundo e produto de cores similares é falha GRAVE. (severity: high se falhar)
 
-[TEXTO_SEPARADO] Headline, subline e CTA estão em zonas que NÃO se sobrepõem ao produto. Texto sobre produto = -1 ponto.
+[TEXTO_SOBRE_PRODUTO] Headline, subline e CTA estão em zonas que NÃO se sobrepõem ao produto. Texto sobre a imagem do produto = -1 ponto.
 
 [SOMBRA_PROFUNDIDADE] Produto tem sombra drop-shadow visível que o faz "flutuar" sobre o fundo, criando profundidade 3D.
 
 [HIERARQUIA_TIPOGRAFICA] Headline > subline > CTA em tamanho. O texto mais importante é o maior.
 
-[LEGIBILIDADE_2S] Em 2 segundos: produto identificado + headline lida + CTA visto. Teste mental: rápido?
+[LEGIBILIDADE_2S] Em 2 segundos: produto identificado + headline lida integralmente + CTA visto. Texto deve ser legível e completo.
 
 [CTA_IMPACTANTE] Botão CTA tem cor de alto contraste, padding generoso, texto uppercase. É impossível não ver.
 
-[PREMIUM_FINISH] Design tem acabamento profissional: espaçamentos consistentes, alinhamentos corretos, sem elementos cortados nas bordas.
+[PREMIUM_FINISH] Design tem acabamento profissional: espaçamentos consistentes, alinhamentos corretos, elementos dentro das bordas.
 
 [PALETA_HARMONICA] Máx 3 cores visíveis dominantes. Regra 60-30-10 respeitada.
 
@@ -719,7 +727,7 @@ RUBRICA DE AVALIAÇÃO (cada critério vale 1 ponto, exceto ★★ que vale 2):
 Briefing original: ${briefing}
 Copy esperado: ${JSON.stringify(copyOutput)}
 
-IMPORTANTE: Seja SEVERO com produto pequeno ou mal posicionado. Um criativo onde o produto não domina a cena NÃO pode passar (score < 8).` }
+ATENÇÃO ESPECIAL: Olhe pixel a pixel para as bordas do canvas (especialmente direita e esquerda). Qualquer letra cortada = texto_cortado. Qualquer sobreposição de elementos textuais = sobreposicao_texto. Esses são os erros mais comuns e mais graves. Um criativo com texto cortado ou sobreposto NUNCA pode ter score ≥ 8.` }
               ],
             }]
           : [{ role: 'user' as const, content: `Não foi possível renderizar a imagem. Retorne: {"score":5,"passed":false,"issues":[{"rule":"render_failed","severity":"high","suggestion":"Verificar HTML do designer"}],"praise":[]}` }]
@@ -765,7 +773,7 @@ Avalie criativos com rigor profissional e retorne sempre JSON válido conforme s
               role: 'user',
               content: [
                 { type: 'image', source: { type: 'url', url: productImageUrl } },
-                { type: 'text', text: `ESTA IMAGEM É O PRODUTO: "${productImageUrl}"\n\nVocê criou este criativo HTML (${W}×${H}px) mas ele foi REPROVADO pelo Crítico Visual:\n\`\`\`html\n${finalHtml}\n\`\`\`\n\nCORREÇÕES OBRIGATÓRIAS:\n${issuesList}\n\nAO CORRIGIR, RESPEITE ESTAS LEIS:\n• O produto (src="${productImageUrl}") DEVE ser o elemento visual dominante — aumente height se necessário\n• Fundo e produto DEVEM contrastar fortemente — mude a cor do fundo se precisar\n• Texto em zona separada — NUNCA sobre o produto\n• Espaçamento mínimo ${Math.round(W * 0.06)}px das bordas\n• Produto com drop-shadow multicamadas se tiver fundo transparente\n• HTML exatamente ${W}px × ${H}px; overflow:hidden\n\nEntregue APENAS entre \`\`\`html e \`\`\`. Zero texto fora do bloco.` }
+                { type: 'text', text: `ESTA IMAGEM É O PRODUTO: "${productImageUrl}"\n\nVocê criou este criativo HTML (${W}×${H}px) mas ele foi REPROVADO pelo Crítico Visual:\n\`\`\`html\n${finalHtml}\n\`\`\`\n\nCORREÇÕES OBRIGATÓRIAS:\n${issuesList}\n\nLEIS INVIOLÁVEIS NA CORREÇÃO:\n• TEXTO NUNCA CORTADO — toda div/p/h1 de texto DEVE ter max-width:${W - 2 * PAD}px; word-wrap:break-word. Nenhuma letra pode sair do canvas.\n• ZONAS SEPARADAS — headline, subline, badge de preço e CTA devem ter bounding boxes que NÃO se sobreponham\n• O produto (src="${productImageUrl}") DEVE ser o elemento visual dominante\n• Fundo e produto DEVEM contrastar fortemente\n• Padding mínimo ${PAD}px de todas as bordas para qualquer elemento\n• Drop-shadow no produto se tiver fundo transparente\n• HTML exatamente ${W}px × ${H}px; overflow:hidden\n\nEntregue APENAS entre \`\`\`html e \`\`\`. Zero texto fora do bloco.` }
               ],
             }]
           : [{
