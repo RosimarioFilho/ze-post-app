@@ -5,15 +5,15 @@ import { createClient } from '@/lib/supabase/client'
 import { CONTENT_TYPE_LABELS, CREATIVE_JOB_STATUS_LABELS, type CreativeJob, type CreativeJobStatus } from '@/types'
 import {
   Upload, X, CheckCircle2, Loader2, AlertCircle, Download,
-  Wand2, Star, ChevronDown, ChevronUp, RefreshCw, Sparkles,
+  Wand2, Star, ChevronDown, ChevronUp, RefreshCw, Sparkles, ImageIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // ── Pipeline steps (em ordem) ─────────────────────────────────
 const PIPELINE_STEPS: CreativeJobStatus[] = [
   'bg_removing', 'analyzing', 'palette_extracting',
-  'strategizing', 'copywriting', 'art_directing',
-  'designing', 'rendering', 'critiquing', 'done',
+  'strategizing', 'copywriting', 'creative_directing',
+  'prompt_engineering', 'generating_image', 'visual_review', 'done',
 ]
 
 type PageState = 'form' | 'pipeline' | 'review'
@@ -28,70 +28,24 @@ interface Company {
 // ── Toast ─────────────────────────────────────────────────────
 function Toast({ msg }: { msg: string }) {
   return (
-    <div className="fixed bottom-6 right-6 z-50 bg-green-600 text-white px-5 py-3 rounded-xl shadow-xl font-semibold text-sm animate-fade-in-up">
+    <div className="fixed bottom-6 right-6 z-50 bg-green-600 text-white px-5 py-3 rounded-xl shadow-xl font-semibold text-sm">
       {msg}
     </div>
   )
 }
 
-// ── Art preview (iframe scaled) ───────────────────────────────
-function ArtPreview({ html, width, height, className }: { html: string; width: number; height: number; className?: string }) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [scale, setScale] = useState(1)
-
-  useEffect(() => {
-    const update = () => {
-      if (!containerRef.current) return
-      const cw = containerRef.current.clientWidth
-      const ch = containerRef.current.clientHeight
-      const sw = cw / width
-      const sh = ch / height
-      setScale(Math.min(sw, sh, 1))
-    }
-    update()
-    const ro = new ResizeObserver(update)
-    if (containerRef.current) ro.observe(containerRef.current)
-    return () => ro.disconnect()
-  }, [width, height])
-
-  return (
-    <div ref={containerRef} className={cn('relative overflow-hidden bg-slate-100 rounded-xl', className)}>
-      <div
-        style={{
-          width,
-          height,
-          transform: `scale(${scale})`,
-          transformOrigin: 'top left',
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          marginTop: -height * scale / 2,
-          marginLeft: -width * scale / 2,
-        }}
-      >
-        <iframe
-          srcDoc={html}
-          style={{ width, height, border: 'none', display: 'block' }}
-          sandbox="allow-same-origin"
-          title="arte-preview"
-        />
-      </div>
-    </div>
-  )
-}
-
-// ── Score badge ───────────────────────────────────────────────
+// ── Score badge (escala 0-100) ────────────────────────────────
 function ScoreBadge({ score }: { score: number }) {
-  const color = score >= 8 ? 'bg-green-500' : score >= 6 ? 'bg-yellow-500' : 'bg-red-500'
+  const color = score >= 85 ? 'bg-green-500' : score >= 70 ? 'bg-yellow-500' : 'bg-red-500'
   return (
     <div className={cn('inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-white text-sm font-bold', color)}>
       <Star className="w-3.5 h-3.5" />
-      {score.toFixed(1)} / 10
+      {score} / 100
     </div>
   )
 }
 
-// ── Detectar transparência (Canvas API, client-side) ──────────
+// ── Detectar transparência (Canvas API) ──────────────────────
 async function detectarTransparencia(file: File): Promise<boolean> {
   if (!file.type.includes('png')) return false
   try {
@@ -117,33 +71,31 @@ export default function StudioPage() {
   const supabase = createClient()
   const router = useRouter()
 
-  // State
   const [pageState, setPageState] = useState<PageState>('form')
   const [company, setCompany] = useState<Company | null>(null)
   const [contentType, setContentType] = useState<string>('post_instagram')
   const [briefing, setBriefing] = useState('')
-  const [productImage, setProductImage] = useState<File | null>(null)
+
+  // Product image
   const [productImageUrl, setProductImageUrl] = useState<string | null>(null)
   const [productPreview, setProductPreview] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
   const [hasTransparentBg, setHasTransparentBg] = useState(false)
 
+  // Reference image (style)
+  const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(null)
+  const [referencePreview, setReferencePreview] = useState<string | null>(null)
+  const [isUploadingRef, setIsUploadingRef] = useState(false)
+
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [jobId, setJobId] = useState<string | null>(null)
   const [job, setJob] = useState<Partial<CreativeJob> | null>(null)
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
 
-  const [ajusteText, setAjusteText] = useState('')
-  const [showAjuste, setShowAjuste] = useState(false)
-  const [isAjusting, setIsAjusting] = useState(false)
   const [showIssues, setShowIssues] = useState(false)
-
-  const [isDownloading, setIsDownloading] = useState(false)
-  const [downloadError, setDownloadError] = useState<string | null>(null)
   const [isApproving, setIsApproving] = useState(false)
   const [toastMsg, setToastMsg] = useState<string | null>(null)
 
-  // Load company
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return
@@ -156,19 +108,13 @@ export default function StudioPage() {
     })
   }, [])
 
-  // Upload product image to Supabase storage
   const handleImageUpload = async (file: File) => {
     if (!company) return
     setIsUploading(true)
     try {
-      const preview = URL.createObjectURL(file)
-      setProductPreview(preview)
-      setProductImage(file)
-
-      // Detectar transparência antes de enviar
+      setProductPreview(URL.createObjectURL(file))
       const transparent = await detectarTransparencia(file)
       setHasTransparentBg(transparent)
-
       const ext = file.name.split('.').pop() ?? 'jpg'
       const path = `${company.id}/ref-${Date.now()}.${ext}`
       const { error } = await supabase.storage.from('media').upload(path, file, { upsert: true })
@@ -181,13 +127,28 @@ export default function StudioPage() {
     }
   }
 
-  // Poll job status
+  const handleReferenceUpload = async (file: File) => {
+    if (!company) return
+    setIsUploadingRef(true)
+    try {
+      setReferencePreview(URL.createObjectURL(file))
+      const ext = file.name.split('.').pop() ?? 'jpg'
+      const path = `${company.id}/references/ref-${Date.now()}.${ext}`
+      const { error } = await supabase.storage.from('media').upload(path, file, { upsert: true })
+      if (!error) {
+        const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(path)
+        setReferenceImageUrl(publicUrl)
+      }
+    } finally {
+      setIsUploadingRef(false)
+    }
+  }
+
   const pollJob = useCallback(async (id: string) => {
     const res = await fetch(`/api/studio/job-status?id=${id}`)
     if (!res.ok) return
     const data: Partial<CreativeJob> = await res.json()
     setJob(data)
-
     if (data.status === 'done') {
       setPageState('review')
       if (pollingRef.current) clearInterval(pollingRef.current)
@@ -196,7 +157,6 @@ export default function StudioPage() {
     }
   }, [])
 
-  // Start generation
   const handleGenerate = async () => {
     if (!company || !briefing.trim()) return
     setIsSubmitting(true)
@@ -210,6 +170,7 @@ export default function StudioPage() {
           briefing,
           productImageUrl: productImageUrl ?? undefined,
           hasTransparentBg,
+          referenceImageUrl: referenceImageUrl ?? undefined,
         }),
       })
       const { jobId: id } = await res.json()
@@ -227,21 +188,21 @@ export default function StudioPage() {
 
   useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current) }, [])
 
-  // Approve art
   const handleApprove = async () => {
-    if (!company || !job?.final_html || isApproving) return
+    if (!company || isApproving) return
+    const imageUrl = job?.generated_image_url ?? job?.final_png_url
+    if (!imageUrl) return
     const [W, H] = getSize(contentType)
     setIsApproving(true)
     try {
       const { data: content } = await supabase.from('contents').insert({
         company_id: company.id,
         title: `Studio: ${briefing.slice(0, 50)}`,
-        body: job.copy_output?.caption ?? briefing,
+        body: job?.copy_output?.caption ?? briefing,
         content_type: contentType,
         platforms: [],
         status: 'pendente_aprovacao',
-        media_urls: job.final_png_url ? [job.final_png_url] : [],
-        art_html: job.final_html,
+        media_urls: [imageUrl],
         art_width: W,
         art_height: H,
       }).select('id').single()
@@ -264,76 +225,26 @@ export default function StudioPage() {
     }
   }
 
-  // Download PNG
-  const handleDownload = async () => {
-    if (!job?.final_html || isDownloading) return
-    const [W, H] = getSize(contentType)
-    setIsDownloading(true)
-    setDownloadError(null)
-    try {
-      const res = await fetch('/api/arte-png', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ html: job.final_html, width: W, height: H }),
-      })
-      if (!res.ok) {
-        const errText = await res.text().catch(() => 'Erro desconhecido')
-        setDownloadError('Falha ao gerar PNG. Tente novamente.')
-        console.error('[studio] download error:', errText)
-        return
-      }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `arte-studio-${Date.now()}.png`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch (err) {
-      console.error('[studio] download error:', err)
-      setDownloadError('Falha ao gerar PNG. Tente novamente.')
-    } finally {
-      setIsDownloading(false)
-    }
+  const handleDownload = () => {
+    const imageUrl = job?.generated_image_url ?? job?.final_png_url
+    if (!imageUrl) return
+    const a = document.createElement('a')
+    a.href = imageUrl
+    a.download = `arte-studio-${Date.now()}.png`
+    a.target = '_blank'
+    a.click()
   }
 
-  // Adjust art
-  const handleAjuste = async () => {
-    if (!ajusteText.trim() || !job?.final_html) return
-    setIsAjusting(true)
-    try {
-      const res = await fetch('/api/gerar-conteudo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tipo: contentType,
-          ajuste: ajusteText,
-          htmlAnterior: job.final_html,
-          copyAnterior: job.copy_output ? `${job.copy_output.headline}\n${job.copy_output.subline}` : '',
-          refImagemUrl: productImageUrl,
-          companyId: company?.id,
-        }),
-      })
-      const data = await res.json()
-      if (data.designerHtml) {
-        setJob(prev => prev ? { ...prev, final_html: data.designerHtml } : prev)
-        setShowAjuste(false)
-        setAjusteText('')
-      }
-    } finally {
-      setIsAjusting(false)
-    }
-  }
-
-  const [W, H] = getSize(contentType)
-  const critique = job?.critique
   const currentStepIndex = job ? PIPELINE_STEPS.indexOf(job.status as CreativeJobStatus) : -1
+  const critique = job?.critique
+  const visualScore = job?.visual_score
+  const imageUrl = job?.generated_image_url ?? job?.final_png_url
 
-  // ── Render ────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-50">
       {toastMsg && <Toast msg={toastMsg} />}
       <div className="max-w-5xl mx-auto px-6 py-8">
+
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
@@ -342,7 +253,7 @@ export default function StudioPage() {
             </div>
             <div>
               <h1 className="text-2xl font-black text-slate-900">Studio IA</h1>
-              <p className="text-sm text-slate-500">Geração de artes premium com 10 agentes especializados</p>
+              <p className="text-sm text-slate-500">Geração de imagens premium com IA — Gemini, Flux, Ideogram, DALL-E</p>
             </div>
           </div>
         </div>
@@ -350,16 +261,15 @@ export default function StudioPage() {
         {/* ── Estado A: Formulário ── */}
         {pageState === 'form' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Coluna esquerda */}
             <div className="space-y-5">
-              {/* Upload de imagem */}
+              {/* Upload produto */}
               <div className="bg-white rounded-2xl border border-slate-200 p-5">
                 <h2 className="font-bold text-slate-800 mb-3">Imagem do produto (opcional)</h2>
                 {productPreview ? (
                   <div className="relative">
                     <img src={productPreview} alt="produto" className="w-full h-48 object-contain rounded-xl bg-slate-50 border border-slate-200" />
                     <button
-                      onClick={() => { setProductImage(null); setProductImageUrl(null); setProductPreview(null); setHasTransparentBg(false) }}
+                      onClick={() => { setProductImageUrl(null); setProductPreview(null); setHasTransparentBg(false) }}
                       className="absolute top-2 right-2 bg-white rounded-full p-1 shadow border border-slate-200 hover:bg-red-50"
                     >
                       <X className="w-4 h-4 text-slate-500" />
@@ -373,7 +283,7 @@ export default function StudioPage() {
                       <div className="mt-2">
                         {hasTransparentBg ? (
                           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
-                            <CheckCircle2 className="w-3 h-3" /> Fundo já transparente — remoção pulada
+                            <CheckCircle2 className="w-3 h-3" /> Fundo já transparente
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-full">
@@ -388,14 +298,39 @@ export default function StudioPage() {
                     <div className="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center hover:border-ze-blue hover:bg-ze-blue/5 transition-colors">
                       <Upload className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                       <p className="text-sm text-slate-500">Clique para enviar PNG, JPG ou WEBP</p>
-                      <p className="text-xs text-slate-400 mt-1">O background será removido automaticamente</p>
+                      <p className="text-xs text-slate-400 mt-1">Produto será incluído na imagem gerada</p>
                     </div>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f) }}
-                    />
+                    <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f) }} />
+                  </label>
+                )}
+              </div>
+
+              {/* Upload referência de estilo */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-5">
+                <h2 className="font-bold text-slate-800 mb-1">Referência de estilo (opcional)</h2>
+                <p className="text-xs text-slate-400 mb-3">A IA vai extrair o estilo visual desta imagem</p>
+                {referencePreview ? (
+                  <div className="relative">
+                    <img src={referencePreview} alt="referência" className="w-full h-32 object-cover rounded-xl bg-slate-50 border border-slate-200" />
+                    <button
+                      onClick={() => { setReferenceImageUrl(null); setReferencePreview(null) }}
+                      className="absolute top-2 right-2 bg-white rounded-full p-1 shadow border border-slate-200 hover:bg-red-50"
+                    >
+                      <X className="w-4 h-4 text-slate-500" />
+                    </button>
+                    {isUploadingRef && (
+                      <div className="absolute inset-0 bg-white/70 rounded-xl flex items-center justify-center">
+                        <Loader2 className="w-5 h-5 animate-spin text-ze-blue" />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <label className="block cursor-pointer">
+                    <div className="border-2 border-dashed border-slate-200 rounded-xl p-5 text-center hover:border-ze-blue hover:bg-ze-blue/5 transition-colors">
+                      <ImageIcon className="w-6 h-6 text-slate-300 mx-auto mb-1" />
+                      <p className="text-xs text-slate-500">Adicionar imagem de referência</p>
+                    </div>
+                    <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleReferenceUpload(f) }} />
                   </label>
                 )}
               </div>
@@ -422,7 +357,6 @@ export default function StudioPage() {
               </div>
             </div>
 
-            {/* Coluna direita */}
             <div className="space-y-5">
               {/* Briefing */}
               <div className="bg-white rounded-2xl border border-slate-200 p-5">
@@ -441,10 +375,14 @@ export default function StudioPage() {
               <div className="bg-gradient-to-br from-ze-blue/5 to-ze-orange/5 rounded-2xl border border-ze-blue/20 p-5">
                 <div className="flex items-center gap-2 mb-3">
                   <Sparkles className="w-4 h-4 text-ze-orange" />
-                  <p className="text-sm font-bold text-slate-800">10 agentes vão trabalhar na sua arte</p>
+                  <p className="text-sm font-bold text-slate-800">Pipeline de 10 agentes especializados</p>
                 </div>
                 <div className="grid grid-cols-2 gap-1 text-xs text-slate-600">
-                  {(['Vision Analyzer', 'Background Remover', 'Palette Intelligence', 'Estrategista', 'Copywriter', 'Diretor de Arte', 'Designer HTML/CSS', 'Render Engine', 'Crítico Visual', 'Autocorreção IA'] as const).map(a => (
+                  {([
+                    'Vision Analyzer', 'Background Remover', 'Palette Intelligence', 'Estrategista',
+                    'Copywriter', 'Diretor Criativo IA', 'Prompt Engineer', 'Image Generation IA',
+                    'Crítico Visual', 'Refinamento IA',
+                  ] as const).map(a => (
                     <div key={a} className="flex items-center gap-1.5">
                       <div className="w-1.5 h-1.5 rounded-full bg-ze-blue/40" />
                       {a}
@@ -459,7 +397,7 @@ export default function StudioPage() {
                 className="w-full py-4 rounded-xl bg-gradient-to-r from-ze-blue to-ze-orange text-white font-black text-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
               >
                 {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wand2 className="w-5 h-5" />}
-                {isSubmitting ? 'Iniciando...' : 'Gerar Arte Premium'}
+                {isSubmitting ? 'Iniciando...' : 'Gerar Imagem Premium'}
               </button>
             </div>
           </div>
@@ -468,12 +406,10 @@ export default function StudioPage() {
         {/* ── Estado B: Pipeline ── */}
         {pageState === 'pipeline' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Pipeline steps */}
             <div className="bg-white rounded-2xl border border-slate-200 p-6">
               <h2 className="font-bold text-slate-800 mb-1">Agentes trabalhando...</h2>
               <p className="text-sm text-slate-400 mb-5">Acompanhe em tempo real</p>
 
-              {/* Progress bar */}
               <div className="w-full h-2 bg-slate-100 rounded-full mb-6 overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-ze-blue to-ze-orange rounded-full transition-all duration-500"
@@ -487,7 +423,6 @@ export default function StudioPage() {
                   const isActive = job?.status === step || (step === 'bg_removing' && job?.status === 'pending')
                   const isFailed = job?.status === 'failed' && isActive
                   const info = CREATIVE_JOB_STATUS_LABELS[step]
-
                   return (
                     <div key={step} className={cn(
                       'flex items-center gap-3 px-4 py-3 rounded-xl transition-all',
@@ -500,14 +435,12 @@ export default function StudioPage() {
                             isActive ? <Loader2 className="w-5 h-5 animate-spin text-ze-blue" /> :
                               <div className="w-5 h-5 rounded-full border-2 border-slate-200" />}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className={cn(
-                          'text-sm font-medium truncate',
-                          isActive ? 'text-ze-blue' : isDone ? 'text-slate-500' : 'text-slate-400'
-                        )}>
-                          {info.emoji} {info.label}
-                        </p>
-                      </div>
+                      <p className={cn(
+                        'text-sm font-medium',
+                        isActive ? 'text-ze-blue' : isDone ? 'text-slate-500' : 'text-slate-400'
+                      )}>
+                        {info.emoji} {info.label}
+                      </p>
                     </div>
                   )
                 })}
@@ -524,18 +457,14 @@ export default function StudioPage() {
             {/* Preview em tempo real */}
             <div className="bg-white rounded-2xl border border-slate-200 p-6">
               <h2 className="font-bold text-slate-800 mb-4">Preview</h2>
-              {job?.rendered_png_url || job?.final_png_url ? (
-                <div className="aspect-square bg-slate-50 rounded-xl overflow-hidden flex items-center justify-center">
-                  <img
-                    src={job.final_png_url ?? job.rendered_png_url}
-                    alt="arte"
-                    className="max-w-full max-h-full object-contain"
-                  />
+              {imageUrl ? (
+                <div className="bg-slate-50 rounded-xl overflow-hidden flex items-center justify-center">
+                  <img src={imageUrl} alt="arte gerada" className="max-w-full max-h-96 object-contain" />
                 </div>
               ) : (
                 <div className="aspect-square bg-slate-50 rounded-xl flex flex-col items-center justify-center gap-3">
                   <Loader2 className="w-8 h-8 animate-spin text-slate-300" />
-                  <p className="text-sm text-slate-400">Gerando sua arte...</p>
+                  <p className="text-sm text-slate-400">Gerando sua imagem...</p>
                 </div>
               )}
             </div>
@@ -546,21 +475,36 @@ export default function StudioPage() {
         {pageState === 'review' && job && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-              {/* Preview da arte */}
+              {/* Imagem gerada */}
               <div className="lg:col-span-3">
                 <div className="bg-white rounded-2xl border border-slate-200 p-6">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="font-bold text-slate-800">Arte gerada</h2>
-                    {critique && <ScoreBadge score={critique.score as number} />}
+                    <h2 className="font-bold text-slate-800">Imagem gerada</h2>
+                    <div className="flex items-center gap-2">
+                      {visualScore !== undefined && <ScoreBadge score={visualScore} />}
+                      {job.image_provider && (
+                        <span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium">
+                          {job.image_provider}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  {job.final_html ? (
-                    <div style={{ aspectRatio: `${W}/${H}`, maxHeight: '480px' }}>
-                    <ArtPreview html={job.final_html} width={W} height={H} className="w-full h-full" />
-                  </div>
-                  ) : job.final_png_url ? (
-                    <img src={job.final_png_url} alt="arte" className="w-full rounded-xl" />
-                  ) : null}
+                  {imageUrl ? (
+                    <img src={imageUrl} alt="arte gerada" className="w-full rounded-xl shadow-sm" />
+                  ) : (
+                    <div className="aspect-square bg-slate-100 rounded-xl flex items-center justify-center">
+                      <p className="text-slate-400 text-sm">Imagem não disponível</p>
+                    </div>
+                  )}
+
+                  {/* Retry info */}
+                  {(job.retry_count ?? 0) > 0 && (
+                    <div className="mt-3 flex items-center gap-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      {job.retry_count} refinamento{(job.retry_count ?? 0) > 1 ? 's' : ''} automático{(job.retry_count ?? 0) > 1 ? 's' : ''} aplicado{(job.retry_count ?? 0) > 1 ? 's' : ''}
+                    </div>
+                  )}
 
                   {/* Crítica */}
                   {critique && (critique.issues as unknown[])?.length > 0 && (
@@ -570,7 +514,7 @@ export default function StudioPage() {
                         className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700"
                       >
                         {showIssues ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                        {(critique.issues as unknown[]).length} pontos de melhoria detectados
+                        {(critique.issues as unknown[]).length} pontos detectados
                       </button>
                       {showIssues && (
                         <div className="mt-3 space-y-2">
@@ -612,18 +556,37 @@ export default function StudioPage() {
                         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">CTA</p>
                         <p className="text-sm font-bold text-ze-orange">{job.copy_output.cta}</p>
                       </div>
+                      {job.copy_output.caption && (
+                        <div>
+                          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Caption</p>
+                          <p className="text-xs text-slate-500 leading-relaxed">{job.copy_output.caption}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
 
-                {/* Correções */}
-                {(job.correction_attempts ?? 0) > 0 && (
-                  <div className="bg-blue-50 rounded-xl border border-blue-200 px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <RefreshCw className="w-4 h-4 text-blue-500" />
-                      <p className="text-xs text-blue-700 font-medium">
-                        {job.correction_attempts} autocorreção{(job.correction_attempts ?? 0) > 1 ? 'ões' : ''} aplicada{(job.correction_attempts ?? 0) > 1 ? 's' : ''} automaticamente
-                      </p>
+                {/* Brief criativo */}
+                {job.creative_brief && (
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5">
+                    <h3 className="font-bold text-slate-800 mb-3">Brief Criativo</h3>
+                    <div className="space-y-1.5 text-xs text-slate-600">
+                      <div className="flex flex-wrap gap-1 mb-2">
+                        <span className="bg-ze-blue/10 text-ze-blue font-semibold px-2 py-0.5 rounded-full">
+                          {job.creative_brief.archetype}
+                        </span>
+                        <span className={cn(
+                          'font-semibold px-2 py-0.5 rounded-full',
+                          job.creative_brief.content_safety === 'safe_for_all'
+                            ? 'bg-green-50 text-green-700'
+                            : 'bg-orange-50 text-orange-700'
+                        )}>
+                          {job.creative_brief.content_safety === 'safe_for_all' ? 'safe for all' : 'adult'}
+                        </span>
+                      </div>
+                      <p><span className="font-medium text-slate-700">Emoção:</span> {job.creative_brief.campaign_emotion}</p>
+                      <p><span className="font-medium text-slate-700">Estilo:</span> {job.creative_brief.visual_style}</p>
+                      <p><span className="font-medium text-slate-700">Foto:</span> {job.creative_brief.photography_style}</p>
                     </div>
                   </div>
                 )}
@@ -632,7 +595,7 @@ export default function StudioPage() {
                 <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
                   <button
                     onClick={handleApprove}
-                    disabled={isApproving}
+                    disabled={isApproving || !imageUrl}
                     className="w-full py-3 rounded-xl bg-green-500 text-white font-bold text-sm flex items-center justify-center gap-2 hover:bg-green-600 transition-colors disabled:opacity-60"
                   >
                     {isApproving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
@@ -641,52 +604,21 @@ export default function StudioPage() {
 
                   <button
                     onClick={handleDownload}
-                    disabled={isDownloading}
+                    disabled={!imageUrl}
                     className="w-full py-3 rounded-xl bg-ze-blue text-white font-bold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-60"
                   >
-                    {isDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                    {isDownloading ? 'Gerando PNG...' : 'Download PNG'}
+                    <Download className="w-4 h-4" />
+                    Baixar Imagem
                   </button>
 
-                  {downloadError && (
-                    <p className="text-xs text-red-500 font-medium text-center">{downloadError}</p>
-                  )}
-
                   <button
-                    onClick={() => setShowAjuste(v => !v)}
+                    onClick={() => { setPageState('form'); setJob(null); setJobId(null) }}
                     className="w-full py-3 rounded-xl border border-slate-200 text-slate-700 font-bold text-sm flex items-center justify-center gap-2 hover:bg-slate-50 transition-colors"
                   >
                     <RefreshCw className="w-4 h-4" />
-                    Ajustar Arte
+                    Gerar nova arte
                   </button>
-
-                  {showAjuste && (
-                    <div className="space-y-2">
-                      <textarea
-                        value={ajusteText}
-                        onChange={e => setAjusteText(e.target.value)}
-                        placeholder="Ex: Deixe o fundo mais escuro, aumente a headline..."
-                        rows={3}
-                        className="w-full text-sm border border-slate-200 rounded-xl p-3 resize-none focus:outline-none focus:ring-2 focus:ring-ze-blue/30"
-                      />
-                      <button
-                        onClick={handleAjuste}
-                        disabled={isAjusting || !ajusteText.trim()}
-                        className="w-full py-2 rounded-xl bg-ze-orange text-white font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-                      >
-                        {isAjusting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                        {isAjusting ? 'Ajustando...' : 'Aplicar Ajuste'}
-                      </button>
-                    </div>
-                  )}
                 </div>
-
-                <button
-                  onClick={() => { setPageState('form'); setJob(null); setJobId(null) }}
-                  className="w-full text-sm text-slate-400 hover:text-slate-600 transition-colors"
-                >
-                  ← Gerar nova arte
-                </button>
               </div>
             </div>
           </div>

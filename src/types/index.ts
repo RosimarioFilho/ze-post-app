@@ -180,13 +180,28 @@ export type CreativeJobStatus =
   | 'palette_extracting'
   | 'strategizing'
   | 'copywriting'
-  | 'art_directing'
-  | 'designing'
-  | 'rendering'
-  | 'critiquing'
-  | 'correcting'
+  | 'creative_directing'
+  | 'prompt_engineering'
+  | 'generating_image'
+  | 'visual_review'
+  | 'regenerating'
   | 'done'
   | 'failed'
+
+export interface CreativeBrief {
+  niche_key: string
+  archetype: string
+  campaign_emotion: string
+  target_audience: string
+  visual_style: string
+  photography_style: string
+  lighting: string
+  composition: string
+  color_mood: string
+  forbidden_elements: string[]
+  required_elements: string[]
+  content_safety: 'safe_for_all' | 'general_adult'
+}
 
 export interface CreativeJob {
   id: string
@@ -204,6 +219,13 @@ export interface CreativeJob {
   strategy?: Record<string, string>
   copy_output?: { headline: string; subline: string; cta: string; caption: string }
   art_direction?: Record<string, unknown>
+  creative_brief?: CreativeBrief
+  image_provider?: string
+  image_prompt?: string
+  generated_image_url?: string
+  visual_score?: number
+  retry_count?: number
+  rejected_reason?: string
   designer_html?: string
   rendered_png_url?: string
   critique?: {
@@ -212,7 +234,7 @@ export interface CreativeJob {
     issues: Array<{ rule: string; severity: 'high' | 'medium' | 'low'; suggestion: string }>
     praise?: string[]
   }
-  correction_attempts: number
+  correction_attempts?: number
   final_html?: string
   final_png_url?: string
   content_id?: string
@@ -250,17 +272,17 @@ export interface DesignTemplate {
 }
 
 export const CREATIVE_JOB_STATUS_LABELS: Record<CreativeJobStatus, { label: string; emoji: string }> = {
-  pending:            { label: 'Aguardando início', emoji: '⏳' },
-  bg_removing:        { label: 'Removendo background...', emoji: '✂️' },
-  analyzing:          { label: 'Analisando imagem...', emoji: '🔍' },
-  palette_extracting: { label: 'Extraindo paleta de cores...', emoji: '🎨' },
-  strategizing:       { label: 'Criando estratégia...', emoji: '🧠' },
-  copywriting:        { label: 'Escrevendo textos...', emoji: '✍️' },
-  art_directing:      { label: 'Definindo direção de arte...', emoji: '🎬' },
-  designing:          { label: 'Desenhando o layout...', emoji: '💻' },
-  rendering:          { label: 'Renderizando imagem...', emoji: '🖼️' },
-  critiquing:         { label: 'Validando qualidade visual...', emoji: '🧐' },
-  correcting:         { label: 'Aplicando correções automáticas...', emoji: '🔧' },
-  done:               { label: 'Arte pronta!', emoji: '✅' },
-  failed:             { label: 'Erro no processo', emoji: '❌' },
+  pending:             { label: 'Aguardando início', emoji: '⏳' },
+  bg_removing:         { label: 'Removendo background...', emoji: '✂️' },
+  analyzing:           { label: 'Analisando imagem...', emoji: '🔍' },
+  palette_extracting:  { label: 'Extraindo paleta de cores...', emoji: '🎨' },
+  strategizing:        { label: 'Criando estratégia...', emoji: '🧠' },
+  copywriting:         { label: 'Escrevendo textos...', emoji: '✍️' },
+  creative_directing:  { label: 'Diretor Criativo definindo brief...', emoji: '🎬' },
+  prompt_engineering:  { label: 'Criando prompt visual...', emoji: '✏️' },
+  generating_image:    { label: 'Gerando imagem com IA...', emoji: '🖼️' },
+  visual_review:       { label: 'Crítico avaliando imagem...', emoji: '🧐' },
+  regenerating:        { label: 'Refinando imagem...', emoji: '🔄' },
+  done:                { label: 'Arte pronta!', emoji: '✅' },
+  failed:              { label: 'Erro no processo', emoji: '❌' },
 }

@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@/lib/supabase/server'
-import {
-  readApiKey,
-  AR_SIZES,
-  extractHtml,
-  enforceProductImage,
-  buildLayoutDimensions,
-  buildLayoutGuide,
-  wrapHtml,
-} from '@/lib/art-utils'
+import { readApiKey, AR_SIZES } from '@/lib/art-utils'
+import { generateImage, uploadGeneratedImage, NoProviderError } from '@/lib/imageProvider'
+import type { CreativeBrief } from '@/types'
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -19,19 +13,18 @@ function parseJson<T>(text: string, fallback: T): T {
   try { return JSON.parse(jsonMatch[0]) as T } catch { return fallback }
 }
 
-// Baixa imagem de qualquer URL e retorna como base64 + mediaType
 async function fetchImageAsBase64(url: string): Promise<{ data: string; mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' } | null> {
   try {
     const res = await fetch(url)
     if (!res.ok) return null
     const contentType = res.headers.get('content-type') ?? 'image/jpeg'
-    const mediaType = contentType.includes('png') ? 'image/png'
-      : contentType.includes('gif') ? 'image/gif'
-      : contentType.includes('webp') ? 'image/webp'
-      : 'image/jpeg'
+    const mediaType = contentType.includes('png') ? 'image/png' as const
+      : contentType.includes('gif') ? 'image/gif' as const
+      : contentType.includes('webp') ? 'image/webp' as const
+      : 'image/jpeg' as const
     const buffer = await res.arrayBuffer()
-    const base64 = Buffer.from(buffer).toString('base64')
-    return { data: base64, mediaType }
+    const data = Buffer.from(buffer).toString('base64')
+    return { data, mediaType }
   } catch {
     return null
   }
@@ -45,72 +38,7 @@ async function updateJob(
   await supabase.from('creative_jobs').update(data).eq('id', jobId)
 }
 
-// ── Contextual Unsplash image search ─────────────────────────
-
-async function searchContextualUnsplashImage(briefing: string, niche?: string): Promise<string> {
-  const key = process.env.UNSPLASH_ACCESS_KEY
-  const fallbacks: Record<string, string> = {
-    automotivo: 'photo-1503376780353-7e6692767b70',
-    tecnologia: 'photo-1496181133206-80ce9b88a853',
-    alimentação: 'photo-1565299624946-b28f40a0ae38',
-    moda: 'photo-1558769132-cb1aea458c5e',
-    fitness: 'photo-1517836357463-d25dfeac3438',
-    negócios: 'photo-1507003211169-0a1dd7228f2d',
-  }
-
-  if (key) {
-    try {
-      const query = encodeURIComponent(`${niche ?? ''} ${briefing}`.slice(0, 60).trim())
-      const res = await fetch(
-        `https://api.unsplash.com/search/photos?query=${query}&per_page=1&orientation=landscape`,
-        { headers: { Authorization: `Client-ID ${key}` } }
-      )
-      if (res.ok) {
-        const data = await res.json()
-        const photo = data.results?.[0]
-        if (photo?.urls?.raw) {
-          return `${photo.urls.raw}&w=1200&q=90&auto=format&fit=crop`
-        }
-      }
-    } catch (err) {
-      console.warn('[studio] Unsplash search failed, using fallback:', err)
-    }
-  }
-
-  // Fallback por nicho
-  const nichoKey = Object.keys(fallbacks).find(k => (niche ?? briefing).toLowerCase().includes(k))
-  const photoId = nichoKey ? fallbacks[nichoKey] : fallbacks['negócios']
-  return `https://images.unsplash.com/${photoId}?w=1200&q=90&auto=format&fit=crop`
-}
-
-// ── Background Removal (Remove.bg) ───────────────────────────
-
-async function removeBackground(imageUrl: string): Promise<string | null> {
-  const apiKey = process.env.REMOVE_BG_API_KEY
-  if (!apiKey) return null
-
-  try {
-    const form = new FormData()
-    form.append('image_url', imageUrl)
-    form.append('size', 'auto')
-
-    const res = await fetch('https://api.remove.bg/v1.0/removebg', {
-      method: 'POST',
-      headers: { 'X-Api-Key': apiKey },
-      body: form,
-    })
-
-    if (!res.ok) {
-      console.warn('[studio] remove.bg failed:', res.status, await res.text())
-      return null
-    }
-
-    return null // Binary response — handled by caller with storage upload
-  } catch (err) {
-    console.warn('[studio] remove.bg error:', err)
-    return null
-  }
-}
+// ── Background Removal ────────────────────────────────────────
 
 async function removeBackgroundAndUpload(
   imageUrl: string,
@@ -139,8 +67,6 @@ async function removeBackgroundAndUpload(
 
     const pngBytes = await res.arrayBuffer()
     const storagePath = `${companyId}/nobg/${jobId}.png`
-
-    // Converter para Blob explicitamente para evitar upload corrompido
     const pngBlob = new Blob([pngBytes], { type: 'image/png' })
     const { error: upErr } = await supabase.storage
       .from('media')
@@ -159,45 +85,173 @@ async function removeBackgroundAndUpload(
   }
 }
 
-// ── Render Engine (calls /api/arte-png) ──────────────────────
+// ── Niche Archetypes ──────────────────────────────────────────
 
-async function renderHtmlToPng(
-  html: string,
-  W: number,
-  H: number,
-  origin: string,
-): Promise<ArrayBuffer | null> {
-  try {
-    const res = await fetch(`${origin}/api/arte-png`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ html, width: W, height: H }),
-    })
-    if (!res.ok) return null
-    return await res.arrayBuffer()
-  } catch (err) {
-    console.warn('[studio] render error:', err)
-    return null
-  }
-}
-
-async function uploadPng(
-  pngBytes: ArrayBuffer,
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  companyId: string,
-  jobId: string,
-  suffix = '',
-): Promise<string | null> {
-  const storagePath = `${companyId}/renders/${jobId}${suffix}.png`
-  const { error } = await supabase.storage
-    .from('media')
-    .upload(storagePath, pngBytes, { contentType: 'image/png', upsert: true })
-  if (error) {
-    console.warn('[studio] png upload error:', error)
-    return null
-  }
-  const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(storagePath)
-  return publicUrl
+const NICHE_ARCHETYPES: Record<string, {
+  archetype: string
+  campaign_emotion: string
+  visual_style: string
+  photography_style: string
+  lighting: string
+  color_mood: string
+  forbidden: string[]
+  required: string[]
+  content_safety: 'safe_for_all' | 'general_adult'
+}> = {
+  academia: {
+    archetype: 'neon_agressivo',
+    campaign_emotion: 'urgência + conquista',
+    visual_style: 'cinematográfico escuro com neon',
+    photography_style: 'atleta em ação musculosa, suor, determinação',
+    lighting: 'luz lateral dura com halo neon verde ou azul',
+    color_mood: 'escuro (quase preto) com neon vibrante',
+    forbidden: ['criança', 'alimentos', 'animais'],
+    required: ['pessoa ativa', 'ambiente fitness'],
+    content_safety: 'general_adult',
+  },
+  infantil: {
+    archetype: 'colorido_alegre',
+    campaign_emotion: 'alegria + segurança',
+    visual_style: 'pastel vibrante limpo',
+    photography_style: 'criança feliz sorrindo, brinquedos coloridos, ambiente seguro',
+    lighting: 'luz natural suave e uniforme',
+    color_mood: 'cores primárias vibrantes fundo claro',
+    forbidden: ['violência', 'sensual', 'adulto', 'álcool', 'cigarro', 'moda masculina genérica', 'poses de influencer'],
+    required: ['criança sorridente', 'ambiente seguro', 'cores alegres'],
+    content_safety: 'safe_for_all',
+  },
+  luxo: {
+    archetype: 'luxo_minimalista',
+    campaign_emotion: 'exclusividade + desejo',
+    visual_style: 'editorial minimalista premium',
+    photography_style: 'produto isolado sobre superfície elegante, reflexo suave',
+    lighting: 'luz de estúdio suave lateral, sombras limpas',
+    color_mood: 'preto ou branco com dourado sutil',
+    forbidden: ['lotação', 'cores berrantes', 'elementos infantis'],
+    required: ['espaço em branco', 'produto central', 'acabamento premium'],
+    content_safety: 'general_adult',
+  },
+  politica: {
+    archetype: 'institucional_impactante',
+    campaign_emotion: 'confiança + liderança',
+    visual_style: 'fotográfico sério com overlay de cor sólida',
+    photography_style: 'líder em pose confiante, bandeira ao fundo, multidão',
+    lighting: 'luz frontal profissional, sem sombras dramáticas',
+    color_mood: 'cores da bandeira ou da campanha com overlay escuro',
+    forbidden: ['humor', 'cores excessivas', 'animação'],
+    required: ['rosto do candidato', 'número eleitoral'],
+    content_safety: 'safe_for_all',
+  },
+  offroad: {
+    archetype: 'aventura_bruto',
+    campaign_emotion: 'liberdade + adrenalina',
+    visual_style: 'fotográfico selvagem com grain cinematográfico',
+    photography_style: 'veículo em trilha de terra/lama, pôr do sol dramático',
+    lighting: 'luz dourada de pôr do sol ou tempestade',
+    color_mood: 'terroso cálido com laranja e marrom',
+    forbidden: ['cidade', 'fundo branco', 'elegância'],
+    required: ['natureza', 'veículo off-road', 'terreno irregular'],
+    content_safety: 'general_adult',
+  },
+  tecnologia: {
+    archetype: 'tech_futurista',
+    campaign_emotion: 'inovação + poder',
+    visual_style: 'futurista com glow neon azul',
+    photography_style: 'dispositivo ou interface com fundo escuro, luzes neon',
+    lighting: 'luz ambiente escura com pontos de luz neon azul',
+    color_mood: 'preto profundo com azul neon e ciano',
+    forbidden: ['rural', 'vintage', 'quente'],
+    required: ['tecnologia', 'interface digital', 'fundo escuro'],
+    content_safety: 'general_adult',
+  },
+  eventos: {
+    archetype: 'eventos_explosivo',
+    campaign_emotion: 'euforia + não pode perder',
+    visual_style: 'vibrante festival com cores saturadas',
+    photography_style: 'multidão animada, palco com luzes coloridas, efeitos de luz',
+    lighting: 'luzes de palco coloridas, fumaça dramática',
+    color_mood: 'gradiente angular de cores vibrantes (rosa, roxo, laranja)',
+    forbidden: ['silêncio', 'minimalismo', 'tons apagados'],
+    required: ['energia', 'pessoas animadas', 'luzes coloridas'],
+    content_safety: 'general_adult',
+  },
+  beleza: {
+    archetype: 'beleza_editorial',
+    campaign_emotion: 'desejo + autoconfiança',
+    visual_style: 'editorial moda suave e elegante',
+    photography_style: 'produto de beleza em close-up com textura de pele, floral sutil',
+    lighting: 'luz difusa suave de estúdio, tons quentes',
+    color_mood: 'nude, rosa claro, dourado suave',
+    forbidden: ['bruto', 'escuro demais', 'masculino agressivo'],
+    required: ['produto em destaque', 'estética limpa', 'luz suave'],
+    content_safety: 'general_adult',
+  },
+  alimentacao: {
+    archetype: 'food_apetitoso',
+    campaign_emotion: 'fome + desejo imediato',
+    visual_style: 'food photography apetitosa e quente',
+    photography_style: 'comida em close-up com vapor, texturas, cores saturadas',
+    lighting: 'luz quente lateral de janela ou vela, sombras suaves',
+    color_mood: 'tons quentes terrosos com vermelho e laranja',
+    forbidden: ['frio', 'azul dominante', 'alimentos com aspecto ruim'],
+    required: ['comida apetitosa', 'textura visível', 'iluminação quente'],
+    content_safety: 'safe_for_all',
+  },
+  servicos: {
+    archetype: 'servicos_profissional',
+    campaign_emotion: 'confiança + solução',
+    visual_style: 'profissional moderno e limpo',
+    photography_style: 'profissional sorridente em ambiente de trabalho moderno',
+    lighting: 'luz natural de escritório ou estúdio neutro',
+    color_mood: 'azul corporativo com branco e cinza',
+    forbidden: ['caótico', 'muito dark', 'animação excessiva'],
+    required: ['rosto humano', 'ambiente profissional', 'clareza visual'],
+    content_safety: 'safe_for_all',
+  },
+  imobiliaria: {
+    archetype: 'imovel_aspiracional',
+    campaign_emotion: 'sonho + realização',
+    visual_style: 'fotográfico arquitetural premium',
+    photography_style: 'imóvel em ângulo amplo, luz natural, acabamento visto',
+    lighting: 'luz natural abundante, golden hour exterior',
+    color_mood: 'branco e bege com verde natural ou azul céu',
+    forbidden: ['escuro', 'bagunçado', 'animação infantil'],
+    required: ['espaço amplo', 'luz natural', 'acabamento visível'],
+    content_safety: 'safe_for_all',
+  },
+  educacao: {
+    archetype: 'educacao_inspirador',
+    campaign_emotion: 'crescimento + possibilidade',
+    visual_style: 'inspirador e acolhedor com cores vivas',
+    photography_style: 'pessoa estudando ou ensinando com sorriso, ambiente de aprendizado',
+    lighting: 'luz natural alegre e uniforme',
+    color_mood: 'amarelo, azul e verde vibrantes com fundo branco',
+    forbidden: ['violência', 'sensual', 'adulto', 'poses de influencer'],
+    required: ['aprendizado', 'pessoas sorridentes', 'ambiente organizado'],
+    content_safety: 'safe_for_all',
+  },
+  ecommerce: {
+    archetype: 'ecommerce_conversao',
+    campaign_emotion: 'urgência + oferta irresistível',
+    visual_style: 'produto hero com selos de oferta',
+    photography_style: 'produto em fundo limpo com sombra, etiqueta de preço visível',
+    lighting: 'luz de estúdio limpa e uniforme',
+    color_mood: 'vermelho, laranja ou verde com branco, cores de ação',
+    forbidden: ['vago', 'sem produto', 'cores apagadas'],
+    required: ['produto em destaque', 'preço ou desconto', 'senso de urgência'],
+    content_safety: 'safe_for_all',
+  },
+  moda: {
+    archetype: 'moda_editorial',
+    campaign_emotion: 'aspiração + identidade',
+    visual_style: 'editorial de moda assimétrico e ousado',
+    photography_style: 'modelo em pose editorial, roupa em destaque, fundo minimalista',
+    lighting: 'luz dramática lateral ou front-fill suave',
+    color_mood: 'monocromático ou paleta limitada de 2 cores fortes',
+    forbidden: ['genérico', 'bagunçado', 'excesso de elementos'],
+    required: ['roupa bem visível', 'pose editorial', 'fundo limpo'],
+    content_safety: 'general_adult',
+  },
 }
 
 // ── Main Orchestration ────────────────────────────────────────
@@ -210,12 +264,11 @@ export async function POST(req: NextRequest) {
   const apiKey = readApiKey()
   if (!apiKey) return NextResponse.json({ error: 'ANTHROPIC_API_KEY não configurada' }, { status: 500 })
 
-  const { companyId, contentType, briefing, productImageUrl, hasTransparentBg } = await req.json()
+  const { companyId, contentType, briefing, productImageUrl, hasTransparentBg, referenceImageUrl } = await req.json()
   if (!companyId || !contentType || !briefing) {
     return NextResponse.json({ error: 'companyId, contentType e briefing são obrigatórios' }, { status: 400 })
   }
 
-  // Criar o job
   const { data: job, error: jobErr } = await supabase
     .from('creative_jobs')
     .insert({
@@ -236,9 +289,12 @@ export async function POST(req: NextRequest) {
 
   const jobId = job.id
 
-  // Executar pipeline de forma assíncrona (não bloqueia a resposta)
-  const origin = req.nextUrl.origin
-  runPipeline({ jobId, companyId, contentType, briefing, productImageUrl, hasTransparentBg: !!hasTransparentBg, supabase, anthropic: new Anthropic({ apiKey }), origin }).catch(err => {
+  runPipeline({
+    jobId, companyId, contentType, briefing,
+    productImageUrl, hasTransparentBg: !!hasTransparentBg,
+    referenceImageUrl,
+    supabase, anthropic: new Anthropic({ apiKey }),
+  }).catch(err => {
     console.error('[studio] pipeline fatal error:', err)
     supabase.from('creative_jobs').update({ status: 'failed', error_message: String(err) }).eq('id', jobId)
   })
@@ -255,18 +311,17 @@ interface PipelineCtx {
   briefing: string
   productImageUrl?: string
   hasTransparentBg?: boolean
+  referenceImageUrl?: string
   supabase: Awaited<ReturnType<typeof createClient>>
   anthropic: Anthropic
-  origin: string
 }
 
 async function runPipeline(ctx: PipelineCtx) {
-  const { jobId, companyId, contentType, briefing, hasTransparentBg, supabase, anthropic, origin } = ctx
+  const { jobId, companyId, contentType, briefing, hasTransparentBg, referenceImageUrl, supabase, anthropic } = ctx
   let { productImageUrl } = ctx
 
   const [W, H] = AR_SIZES[contentType] ?? [1080, 1080]
 
-  // Buscar dados da empresa e brand kit
   const [{ data: company }, { data: brandKit }] = await Promise.all([
     supabase.from('companies').select('name, primary_color, secondary_color, logo_url, niche').eq('id', companyId).single(),
     supabase.from('brand_kits').select('*').eq('company_id', companyId).maybeSingle(),
@@ -275,8 +330,7 @@ async function runPipeline(ctx: PipelineCtx) {
   const pc = company?.primary_color ?? '#052d64'
   const sc = company?.secondary_color ?? '#fe7902'
   const companyName = company?.name ?? 'Sua Empresa'
-  const niche = company?.niche ?? ''
-  const primaryFont = brandKit?.primary_font ?? 'Montserrat'
+  const niche = company?.niche ?? 'servicos'
   const toneOfVoice = brandKit?.tone_of_voice ?? 'profissional'
   const preferredCtas = (brandKit?.preferred_ctas ?? ['Saiba mais', 'Aproveite']).join(', ')
 
@@ -293,21 +347,22 @@ async function runPipeline(ctx: PipelineCtx) {
       }
     }
 
-    // ── Passo 2: Vision Analyzer ────────────────────────────
+    // ── Passo 2: Vision Analyzer (produto + referência) ─────
     let visionAnalysis: Record<string, unknown> = {}
-    if (productImageUrl) {
+    let referenceStyle = ''
+
+    if (productImageUrl || referenceImageUrl) {
       await updateJob(supabase, jobId, { status: 'analyzing', current_agent: 'Vision Analyzer', progress_pct: 15 })
 
-      try {
-        // Baixar imagem como base64 para evitar problemas de URL inacessível
-        const imgBase64 = await fetchImageAsBase64(productImageUrl)
-        if (!imgBase64) throw new Error('Não foi possível baixar a imagem do produto')
-
-        const visionRes = await anthropic.messages.create({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 1024,
-          system: `Você é Ana, Analista Visual especialista em marketing digital.
-Analise a imagem e retorne APENAS JSON puro (sem markdown) com exatamente estas chaves:
+      if (productImageUrl) {
+        try {
+          const imgBase64 = await fetchImageAsBase64(productImageUrl)
+          if (imgBase64) {
+            const visionRes = await anthropic.messages.create({
+              model: 'claude-sonnet-4-6',
+              max_tokens: 1024,
+              system: `Você é Ana, Analista Visual especialista em marketing digital.
+Analise a imagem e retorne APENAS JSON puro (sem markdown):
 {
   "product_type": "",
   "dominant_colors": [],
@@ -316,28 +371,50 @@ Analise a imagem e retorne APENAS JSON puro (sem markdown) com exatamente estas 
   "has_person": false,
   "object_position": "center|left|right",
   "background_type": "clean|complex|transparent|gradient",
-  "needs_bg_removal": false,
   "best_text_area": "left|right|top|bottom|center",
   "suggested_visual_style": "premium|popular|clean|luxury|modern|aggressive|institutional",
+  "product_description": "",
   "observations": ""
 }`,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'image', source: { type: 'base64', media_type: imgBase64.mediaType, data: imgBase64.data } },
-              { type: 'text', text: `Esta é a imagem do produto para o criativo. Analise e retorne o JSON conforme instruído. Nicho: ${niche || 'geral'}.` },
-            ],
-          }],
-        })
+              messages: [{
+                role: 'user',
+                content: [
+                  { type: 'image', source: { type: 'base64', media_type: imgBase64.mediaType, data: imgBase64.data } },
+                  { type: 'text', text: `Analise este produto para criativo de marketing. Nicho: ${niche}.` },
+                ],
+              }],
+            })
+            const visionText = visionRes.content[0].type === 'text' ? visionRes.content[0].text : '{}'
+            visionAnalysis = parseJson(visionText, {})
+            await updateJob(supabase, jobId, { vision_analysis: visionAnalysis })
+          }
+        } catch (err) {
+          console.warn('[studio] Vision Analyzer falhou:', err)
+          visionAnalysis = { observations: 'Análise visual indisponível' }
+        }
+      }
 
-        const visionText = visionRes.content[0].type === 'text' ? visionRes.content[0].text : '{}'
-        visionAnalysis = parseJson(visionText, {})
-        await updateJob(supabase, jobId, { vision_analysis: visionAnalysis })
-      } catch (visionErr) {
-        // Formato de imagem não suportado ou URL inacessível — continua sem análise visual
-        console.warn('[studio] Vision Analyzer falhou, continuando sem análise:', visionErr)
-        visionAnalysis = { observations: 'Análise visual indisponível — formato de imagem não suportado' }
-        await updateJob(supabase, jobId, { vision_analysis: visionAnalysis })
+      if (referenceImageUrl) {
+        try {
+          const refBase64 = await fetchImageAsBase64(referenceImageUrl)
+          if (refBase64) {
+            const refRes = await anthropic.messages.create({
+              model: 'claude-sonnet-4-6',
+              max_tokens: 512,
+              system: 'Você é um analista de estilo visual. Descreva em 3-4 frases o estilo, composição, paleta e iluminação da imagem de referência. Seja conciso e em inglês.',
+              messages: [{
+                role: 'user',
+                content: [
+                  { type: 'image', source: { type: 'base64', media_type: refBase64.mediaType, data: refBase64.data } },
+                  { type: 'text', text: 'Descreva o estilo visual desta imagem de referência para geração de imagem.' },
+                ],
+              }],
+            })
+            referenceStyle = refRes.content[0].type === 'text' ? refRes.content[0].text : ''
+          }
+        } catch (err) {
+          console.warn('[studio] Reference style analysis failed:', err)
+        }
       }
     }
 
@@ -348,7 +425,7 @@ Analise a imagem e retorne APENAS JSON puro (sem markdown) com exatamente estas 
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 512,
       system: `Você é Bianca, Especialista em Identidade Visual.
-Crie uma paleta harmônica para o criativo. Retorne APENAS JSON puro com estas chaves:
+Crie uma paleta harmônica. Retorne APENAS JSON puro:
 {
   "background": "#hex",
   "text_primary": "#hex",
@@ -357,24 +434,16 @@ Crie uma paleta harmônica para o criativo. Retorne APENAS JSON puro com estas c
   "cta_bg": "#hex",
   "cta_text": "#hex",
   "gradient_from": "#hex",
-  "gradient_to": "#hex",
-  "contrast_note": "AA|AAA"
-}
-REGRAS: máximo 3 cores principais, CTA com alto contraste, nunca usar mais de 3 cores visíveis.`,
+  "gradient_to": "#hex"
+}`,
       messages: [{
         role: 'user',
-        content: `Dados para criar a paleta:
-- Cor primária da marca: ${pc}
-- Cor secundária da marca: ${sc}
-- Análise visual do produto: ${JSON.stringify(visionAnalysis)}
-- Nicho: ${niche || 'geral'}
-- Tom de voz: ${toneOfVoice}
-Crie uma paleta que harmonize com o produto e respeite a identidade da marca.`,
+        content: `Cor primária: ${pc}\nCor secundária: ${sc}\nAnálise visual: ${JSON.stringify(visionAnalysis)}\nNicho: ${niche}\nTom: ${toneOfVoice}`,
       }],
     })
 
     const paletteText = paletteRes.content[0].type === 'text' ? paletteRes.content[0].text : '{}'
-    const palette = parseJson<Record<string, string>>(paletteText, { background: pc, text_primary: '#ffffff', accent: sc, cta_bg: sc, cta_text: '#ffffff', gradient_from: pc, gradient_to: '#0a1628' })
+    const palette = parseJson<Record<string, string>>(paletteText, { background: pc, text_primary: '#ffffff', accent: sc })
     await updateJob(supabase, jobId, { palette })
 
     // ── Passo 4: Estrategista ────────────────────────────────
@@ -383,8 +452,7 @@ Crie uma paleta que harmonize com o produto e respeite a identidade da marca.`,
     const stratRes = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 512,
-      system: `Você é Ana, Estrategista de Conteúdo especialista em marketing digital brasileiro.
-Retorne APENAS JSON puro:
+      system: `Retorne APENAS JSON puro:
 {
   "objective": "",
   "target_audience": "",
@@ -396,11 +464,7 @@ Retorne APENAS JSON puro:
 }`,
       messages: [{
         role: 'user',
-        content: `Briefing: ${briefing}
-Empresa: ${companyName}
-Nicho: ${niche || 'geral'}
-Tom de voz preferido: ${toneOfVoice}
-Tipo de criativo: ${contentType}`,
+        content: `Briefing: ${briefing}\nEmpresa: ${companyName}\nNicho: ${niche}\nTom: ${toneOfVoice}\nFormato: ${contentType}`,
       }],
     })
 
@@ -414,22 +478,17 @@ Tipo de criativo: ${contentType}`,
     const copyRes = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 512,
-      system: `Você é Bruno, Copywriter especialista em conversão para redes sociais no Brasil.
-Retorne APENAS JSON puro:
+      system: `Retorne APENAS JSON puro:
 {
   "headline": "",
   "subline": "",
   "cta": "",
   "caption": ""
 }
-REGRAS: headline máx 8 palavras impactantes, subline máx 10 palavras, CTA direto 2-3 palavras, caption com emojis e hashtags.`,
+Headline máx 8 palavras impactantes. Subline máx 10 palavras. CTA 2-3 palavras diretas. Caption com emojis e hashtags.`,
       messages: [{
         role: 'user',
-        content: `Estratégia: ${JSON.stringify(strategy)}
-Briefing: ${briefing}
-Empresa: ${companyName}
-CTAs preferidos da marca: ${preferredCtas}
-Nicho: ${niche || 'geral'}`,
+        content: `Estratégia: ${JSON.stringify(strategy)}\nBriefing: ${briefing}\nEmpresa: ${companyName}\nCTAs da marca: ${preferredCtas}\nNicho: ${niche}`,
       }],
     })
 
@@ -440,361 +499,268 @@ Nicho: ${niche || 'geral'}`,
     )
     await updateJob(supabase, jobId, { copy_output: copyOutput })
 
-    // ── Passo 6: Diretor de Arte ─────────────────────────────
-    await updateJob(supabase, jobId, { status: 'art_directing', current_agent: 'Diretor de Arte', progress_pct: 55 })
+    // ── Passo 6: Diretor Criativo IA ─────────────────────────
+    await updateJob(supabase, jobId, { status: 'creative_directing', current_agent: 'Diretor Criativo IA', progress_pct: 55 })
 
-    const { data: templates } = await supabase
-      .from('design_templates')
-      .select('id, name, category, description, compatible_formats')
-      .contains('compatible_formats', [contentType])
-      .eq('is_active', true)
+    const baseArchetype = NICHE_ARCHETYPES[niche] ?? NICHE_ARCHETYPES['servicos']
 
-    const templateList = (templates ?? []).map(t => `- id: ${t.id} | nome: ${t.name} | categoria: ${t.category} | desc: ${t.description}`).join('\n')
-
-    const artDirRes = await anthropic.messages.create({
+    const creativeDirRes = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 512,
-      system: `Você é Leo, Diretor de Arte sênior especialista em criativos premium para redes sociais.
-Retorne APENAS JSON puro:
+      max_tokens: 1024,
+      system: `Você é um Diretor Criativo sênior de uma grande agência de publicidade.
+Sua tarefa é criar um brief visual para geração de imagem via IA.
+Retorne APENAS JSON puro com esta estrutura exata:
 {
-  "template_id": "uuid ou null",
-  "composition": "hero_central|hero_bottom|split_right",
-  "product_emphasis": "dominant",
-  "text_position": "top|bottom|left",
-  "background_style": "gradient|solid_dark|solid_vivid",
-  "use_glow": false,
-  "use_shadow": true,
-  "use_badge": false,
-  "decoration_level": "none|minimal",
-  "reasoning": ""
+  "niche_key": "",
+  "archetype": "",
+  "campaign_emotion": "",
+  "target_audience": "",
+  "visual_style": "",
+  "photography_style": "",
+  "lighting": "",
+  "composition": "",
+  "color_mood": "",
+  "forbidden_elements": [],
+  "required_elements": [],
+  "content_safety": "safe_for_all"
 }
-
-FILOSOFIA DE ARTE PREMIUM:
-- O produto é a ESTRELA. Tudo mais é coadjuvante.
-- "hero_central" é a composição padrão para qualquer formato que não seja horizontal.
-- "split_right" SOMENTE para formatos horizontais (landscape) — NUNCA para quadrado ou vertical.
-- Sombra profunda (drop-shadow) é OBRIGATÓRIA quando o produto tem fundo removido.
-- Fundo deve contrastar FORTEMENTE com o produto: produto claro → fundo escuro; produto escuro → fundo claro/vívido.
-- Gradiente radial (escurece nas bordas) cria profundidade premium sem esforço.
-- Texto NUNCA compete com o produto: coloca headline acima ou CTA footer abaixo, com zona separada.
-- Badge de preço em círculo no canto é OK — não interfere no produto.
-- "decoration_level" máximo "minimal" — 1 ou 2 formas geométricas opacity 0.08-0.15.
-- Safe area: ${Math.round(Math.min(W, H) * 0.06)}px de todas as bordas.`,
+Adapte o archetype base ao briefing específico. Seja preciso e criativo.`,
       messages: [{
         role: 'user',
-        content: `Formato: ${contentType} (${W}×${H}px)
+        content: `Empresa: ${companyName}
+Nicho: ${niche}
+Cor primária: ${pc} | Cor secundária: ${sc}
+Formato: ${contentType} (${W}×${H}px)
+Briefing: ${briefing}
+Estratégia: ${JSON.stringify(strategy)}
 Copy criado: ${JSON.stringify(copyOutput)}
-Análise visual: ${JSON.stringify(visionAnalysis)}
 Paleta: ${JSON.stringify(palette)}
-Templates disponíveis:\n${templateList || 'Nenhum — criar do zero'}`,
+Tem imagem de produto: ${!!productImageUrl}
+Análise do produto: ${JSON.stringify(visionAnalysis)}
+
+ARCHETYPE BASE para este nicho (use como referência e adapte):
+${JSON.stringify(baseArchetype, null, 2)}
+
+Crie o brief visual adaptado ao briefing específico desta campanha.`,
       }],
     })
 
-    const artDirText = artDirRes.content[0].type === 'text' ? artDirRes.content[0].text : '{}'
-    const artDirection = parseJson<Record<string, unknown>>(artDirText, { composition: 'hero_central', use_shadow: true })
-    await updateJob(supabase, jobId, { art_direction: artDirection })
+    const creativeDirText = creativeDirRes.content[0].type === 'text' ? creativeDirRes.content[0].text : '{}'
+    let creativeBrief: CreativeBrief = parseJson<CreativeBrief>(creativeDirText, {
+      niche_key: niche,
+      archetype: baseArchetype.archetype,
+      campaign_emotion: baseArchetype.campaign_emotion,
+      target_audience: strategy.target_audience ?? 'público-alvo geral',
+      visual_style: baseArchetype.visual_style,
+      photography_style: baseArchetype.photography_style,
+      lighting: baseArchetype.lighting,
+      composition: 'produto centralizado, espaço para texto',
+      color_mood: baseArchetype.color_mood,
+      forbidden_elements: baseArchetype.forbidden,
+      required_elements: baseArchetype.required,
+      content_safety: baseArchetype.content_safety,
+    })
+    await updateJob(supabase, jobId, { creative_brief: creativeBrief })
 
-    // Buscar HTML skeleton do template escolhido (se houver)
-    let templateSkeleton = ''
-    const chosenTemplateId = artDirection.template_id as string | null
-    if (chosenTemplateId) {
-      const { data: tpl } = await supabase.from('design_templates').select('html_skeleton').eq('id', chosenTemplateId).single()
-      if (tpl?.html_skeleton) {
-        templateSkeleton = tpl.html_skeleton
-          .replace(/\{\{HEADLINE\}\}/g, copyOutput.headline)
-          .replace(/\{\{SUBLINE\}\}/g, copyOutput.subline)
-          .replace(/\{\{CTA\}\}/g, copyOutput.cta)
-          .replace(/\{\{COMPANY_NAME\}\}/g, companyName)
-          .replace(/\{\{PRIMARY_COLOR\}\}/g, pc)
-          .replace(/\{\{SECONDARY_COLOR\}\}/g, sc)
-          .replace(/\{\{PRODUCT_IMAGE_URL\}\}/g, productImageUrl ?? '')
-          .replace(/\{\{WIDTH\}\}/g, String(W))
-          .replace(/\{\{HEIGHT\}\}/g, String(H))
-          .replace(/\{\{PRODUCT_HEIGHT\}\}/g, String(Math.round(H * (contentType === 'stories' || contentType === 'reels' ? 0.54 : 0.68))))
-          .replace(/\{\{HEADLINE_SIZE\}\}/g, String(Math.round(Math.min(W, H) / 8)))
-          .replace(/\{\{SUBLINE_SIZE\}\}/g, String(Math.round(Math.min(W, H) / 22)))
-          .replace(/\{\{PRICE\}\}/g, '')
-      }
-    }
+    // ── Passo 7: Visual Prompt Engineer ─────────────────────
+    await updateJob(supabase, jobId, { status: 'prompt_engineering', current_agent: 'Visual Prompt Engineer', progress_pct: 65 })
 
-    // ── Passo 7: Designer HTML/CSS ───────────────────────────
-    await updateJob(supabase, jobId, { status: 'designing', current_agent: 'Designer HTML/CSS', progress_pct: 65 })
-
-    const dims = buildLayoutDimensions(contentType, W, H)
-    const layoutGuide = buildLayoutGuide(contentType, W, H)
-    const { isVertical, isSquare, headlinePx, sublinePx, priceBigPx, ctaPx, PAD, GAP } = dims
-
-    const skeletonNote = templateSkeleton
-      ? `\n\nPONTO DE PARTIDA — Template selecionado pelo Diretor de Arte (adapte e melhore):\n\`\`\`html\n${templateSkeleton}\n\`\`\`\n`
+    const productDesc = visionAnalysis.product_description
+      ? `The product is: ${visionAnalysis.product_description}. Place it prominently centered in the image.`
+      : productImageUrl
+      ? `Include the product prominently centered and large in the image.`
       : ''
 
-    const designerSystemPrompt = `Você é Carla, Designer SENIOR especialista em HTML/CSS para criativos de marketing digital PREMIUM.
+    const referenceNote = referenceStyle
+      ? `\nVisual reference style to emulate: ${referenceStyle}`
+      : ''
 
-FILOSOFIA: Cada criativo deve passar no teste dos 2 segundos — o produto é identificado instantaneamente, a mensagem é absorvida sem esforço, o CTA é irresistível.
+    const promptEngineerRes = await anthropic.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 512,
+      system: `You are an expert Visual Prompt Engineer specializing in AI image generation (Flux, Imagen, DALL-E, Midjourney).
+Create a single, highly detailed, professional advertising photography prompt in English.
+The prompt must be optimized for photorealistic commercial advertising photography.
+Return ONLY the prompt text, no explanations, no JSON, no markdown.`,
+      messages: [{
+        role: 'user',
+        content: `Create an image generation prompt for this advertising campaign:
 
-REGRAS ABSOLUTAS (violá-las invalida o trabalho):
-1. O PRODUTO É O HERÓI. Ele ocupa o espaço visual dominante. NUNCA miniaturize o produto.
-2. CONTRASTE OBRIGATÓRIO. Fundo deve contrastar fortemente com o produto. Produto claro? Fundo escuro. Produto colorido? Fundo neutro escuro.
-3. SOMBRA PROFUNDA. Produto com fundo removido SEMPRE recebe drop-shadow multicamadas para flutuar.
-4. TEXTO EM ZONA SEPARADA. Headline, subline e CTA ficam em áreas que NÃO se sobrepõem ao produto NEM a badges/preços. Cada zona de texto é exclusiva.
-5. HIERARQUIA VISUAL. Tamanhos de fonte seguem razão áurea: headline → subline → CTA → legenda (1 : 0.6 : 0.45 : 0.35).
-6. CTA DESTACADO. Botão com padding generoso, cor acento de alto contraste, uppercase + letter-spacing.
-7. DECORAÇÃO MÍNIMA. Máx 2 elementos decorativos, opacity 0.08–0.18. Menos é mais.
-8. FONTE PREMIUM. @import ${primaryFont} do Google Fonts. Headline peso 900, sem serifas.
-9. URL DO PRODUTO SAGRADA. A URL fornecida vai no src do img. Jamais substitua por outra imagem.
-10. HTML COMPLETO. position:absolute em tudo. body: width:${W}px; height:${H}px; overflow:hidden; position:relative; margin:0; padding:0.
-11. TEXTO NUNCA CORTADO. TODA div/p/h1/span de texto DEVE ter: max-width:${W - 2 * PAD}px; word-wrap:break-word; overflow-wrap:break-word; box-sizing:border-box. Nunca use white-space:nowrap em headlines. Texto que ultrapassa a borda do canvas é FALHA CRÍTICA.
-12. ZONAS SEM SOBREPOSIÇÃO. Calcule as coordenadas top/left/width/height de cada elemento e certifique-se de que os bounding boxes de headline, subline, CTA e badge NÃO se sobrepõem entre si. Se houver badge de preço, posicione-o em canto oposto à headline.`
+Company: ${companyName}
+Campaign headline: "${copyOutput.headline}"
+Campaign subline: "${copyOutput.subline}"
+Campaign CTA: "${copyOutput.cta}"
+${productDesc}
+Visual style: ${creativeBrief.visual_style}
+Photography style: ${creativeBrief.photography_style}
+Lighting: ${creativeBrief.lighting}
+Composition: ${creativeBrief.composition}
+Color mood: ${creativeBrief.color_mood}
+Campaign emotion: ${creativeBrief.campaign_emotion}
+Required elements: ${creativeBrief.required_elements.join(', ')}
+Forbidden elements (must NOT appear): ${creativeBrief.forbidden_elements.join(', ')}
+Content safety: ${creativeBrief.content_safety === 'safe_for_all' ? 'safe for all ages, family friendly' : 'general adult audience'}
+Image dimensions: ${W}x${H}px${referenceNote}
 
-    // Buscar imagem contextual Unsplash quando não há produto
-    const contextualImageUrl = productImageUrl ? null : await searchContextualUnsplashImage(briefing, niche)
+Write a detailed, specific prompt (80-120 words) using photography and art direction terminology.
+Include: subject, action/pose, environment, lighting direction, camera angle, lens, color palette, mood.
+Do NOT include any text, words, headlines, or typography in the image.
+End with: "professional advertising photography, commercial quality, sharp focus, high resolution"`,
+      }],
+    })
 
-    const designerUserPrompt = productImageUrl
-      ? `═══ CRIATIVO ${W}×${H}px | ${isVertical ? 'STORIES/REELS' : isSquare ? 'POST QUADRADO' : 'HORIZONTAL'} ═══
+    const imagePrompt = promptEngineerRes.content[0].type === 'text'
+      ? promptEngineerRes.content[0].text.trim()
+      : `${creativeBrief.photography_style}, ${creativeBrief.lighting}, ${creativeBrief.color_mood}, professional advertising photography, commercial quality, sharp focus, high resolution`
 
-URL DO PRODUTO (SAGRADA — copie exatamente no src):
-"${productImageUrl}"
+    await updateJob(supabase, jobId, { image_prompt: imagePrompt })
 
-EMPRESA: ${companyName}
-PALETA: fundo ${palette.background ?? pc} | texto ${palette.text_primary ?? '#fff'} | acento ${palette.accent ?? sc} | CTA bg ${palette.cta_bg ?? sc}
-${skeletonNote}
-COPY:
-• Headline: "${copyOutput.headline}"
-• Subline: "${copyOutput.subline}"
-• CTA: "${copyOutput.cta}"
+    // ── Passo 8: Image Generation ────────────────────────────
+    await updateJob(supabase, jobId, { status: 'generating_image', current_agent: 'Image Generation IA', progress_pct: 75 })
 
-DIREÇÃO DE ARTE: composição=${artDirection.composition} | shadow=${artDirection.use_shadow} | badge=${artDirection.use_badge}
-Análise do produto: ${JSON.stringify(visionAnalysis).slice(0, 300)}
-
-${layoutGuide}
-
-TIPOGRAFIA — @import url('https://fonts.googleapis.com/css2?family=${primaryFont.replace(/ /g,'+')}:wght@400;700;900&display=swap') no <head>:
-• Headline: ${headlinePx}px | weight:900 | line-height:0.9 | text-transform:uppercase | letter-spacing:-0.02em
-• Subline: ${sublinePx}px | weight:400 | opacity:0.88
-• Preço/destaque: ${priceBigPx}px | weight:900 | cor acento
-• CTA: ${ctaPx}px | weight:700 | uppercase | letter-spacing:0.06em
-
-CHECKLIST FINAL — responda mentalmente SIM para cada item antes de entregar:
-□ <img src="${productImageUrl}"> está no HTML com a URL exata?
-□ O produto é o maior elemento visual (ocupa >60% da área)?
-□ Cada div/p/h1 de texto tem max-width:${W - 2 * PAD}px e word-wrap:break-word?
-□ Nenhuma palavra da headline, subline ou CTA está cortada pela borda do canvas?
-□ O badge de preço (se houver) está em canto OPOSTO à headline, sem sobreposição?
-□ Nenhum texto se sobrepõe a nenhum outro texto ou badge?
-□ O fundo contrasta fortemente com o produto?
-□ HTML tem width:${W}px e height:${H}px exatos?
-
-Entregue APENAS o bloco \`\`\`html ... \`\`\`. Zero texto fora do bloco.`
-      : `═══ CRIATIVO ${W}×${H}px | ${isVertical ? 'STORIES/REELS' : isSquare ? 'POST QUADRADO' : 'HORIZONTAL'} ═══
-
-EMPRESA: ${companyName} | NICHO: ${niche || 'geral'}
-PALETA: fundo ${palette.background ?? pc} | texto ${palette.text_primary ?? '#fff'} | acento ${palette.accent ?? sc}
-${skeletonNote}
-COPY:
-• Headline: "${copyOutput.headline}"
-• Subline: "${copyOutput.subline}"
-• CTA: "${copyOutput.cta}"
-
-SEM IMAGEM DO PRODUTO — use esta foto temática contextual como elemento visual:
-URL DA FOTO (copie exatamente no src): "${contextualImageUrl}"
-Use EXATAMENTE esta URL. NÃO substitua por outra imagem.
-
-${layoutGuide}
-
-TIPOGRAFIA — @import url('https://fonts.googleapis.com/css2?family=${primaryFont.replace(/ /g,'+')}:wght@400;700;900&display=swap') no <head>:
-• Headline: ${headlinePx}px | weight:900 | uppercase
-• Subline: ${sublinePx}px | weight:400
-• CTA: ${ctaPx}px | weight:700 | uppercase | letter-spacing:0.06em
-
-CHECKLIST:
-□ <img src="${contextualImageUrl}"> está no HTML?
-□ HTML tem width:${W}px e height:${H}px?
-
-Entregue APENAS o bloco \`\`\`html ... \`\`\`.`
-
-    // Tentar enviar imagem como base64 para o Designer (mais confiável que URL)
-    let productBase64: { data: string; mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' } | null = null
-    if (productImageUrl) {
-      productBase64 = await fetchImageAsBase64(productImageUrl)
+    let productBase64ForGen: string | undefined
+    if (productImageUrl && process.env.FAL_KEY) {
+      const imgData = await fetchImageAsBase64(productImageUrl)
+      if (imgData) productBase64ForGen = imgData.data
     }
 
-    const buildDesignerMessages = (withVision: boolean): Parameters<typeof anthropic.messages.create>[0]['messages'] =>
-      productImageUrl && withVision && productBase64
-        ? [{
-            role: 'user' as const,
-            content: [
-              { type: 'image' as const, source: { type: 'base64' as const, media_type: productBase64.mediaType, data: productBase64.data } },
-              { type: 'text' as const, text: `ESTA IMAGEM É O PRODUTO. Sua URL é: "${productImageUrl}"\nUse EXATAMENTE esta URL no src do <img>. NÃO use nenhuma outra imagem.\n\n${designerUserPrompt}` },
-            ],
-          }]
-        : [{ role: 'user' as const, content: designerUserPrompt }]
+    const imageResult = await generateImage(imagePrompt, contentType, W, H, productBase64ForGen)
+    const generatedUrl = await uploadGeneratedImage(
+      imageResult.base64, imageResult.mimeType, supabase, companyId, jobId
+    )
 
-    let designerResText = ''
-    try {
-      const designerRes = await anthropic.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
-        system: designerSystemPrompt,
-        messages: buildDesignerMessages(true),
-      })
-      designerResText = designerRes.content[0].type === 'text' ? designerRes.content[0].text : ''
-    } catch {
-      // Fallback sem vision
-      console.warn('[studio] Designer com vision falhou, tentando sem imagem na mensagem')
-      const designerRes = await anthropic.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
-        system: designerSystemPrompt,
-        messages: buildDesignerMessages(false),
-      })
-      designerResText = designerRes.content[0].type === 'text' ? designerRes.content[0].text : ''
-    }
+    await updateJob(supabase, jobId, {
+      generated_image_url: generatedUrl,
+      image_provider: imageResult.provider,
+    })
 
-    let designerHtml = extractHtml(designerResText)
-    if (productImageUrl) designerHtml = enforceProductImage(designerHtml, productImageUrl)
-    designerHtml = wrapHtml(designerHtml, W, H)
+    // ── Passo 9: Visual Review ───────────────────────────────
+    await updateJob(supabase, jobId, { status: 'visual_review', current_agent: 'Crítico Visual', progress_pct: 90 })
 
-    await updateJob(supabase, jobId, { designer_html: designerHtml })
-
-    // ── Passo 8+9+10: Render → Critique (com loop de correção) ──
-    let finalHtml = designerHtml
-    let finalPngUrl: string | null = null
-    let finalPngBytes: ArrayBuffer | null = null
-    let critique: Record<string, unknown> = { score: 10, passed: true, issues: [] }
-    let correctionAttempts = 0
+    let retryCount = 0
+    let currentImageBase64 = imageResult.base64
+    let currentImageUrl = generatedUrl
+    let finalScore = 0
+    let critique: Record<string, unknown> = {}
 
     for (let attempt = 0; attempt <= 2; attempt++) {
-      // Render
-      await updateJob(supabase, jobId, {
-        status: 'rendering',
-        current_agent: 'Render Engine',
-        progress_pct: 75 + attempt * 5,
-      })
-
-      const pngBytes = await renderHtmlToPng(finalHtml, W, H, ctx.origin)
-      if (pngBytes) {
-        finalPngBytes = pngBytes
-        const suffix = attempt > 0 ? `_v${attempt + 1}` : ''
-        finalPngUrl = await uploadPng(pngBytes, supabase, companyId, jobId, suffix)
-        await updateJob(supabase, jobId, { rendered_png_url: finalPngUrl })
-      }
-
-      // Critique — usa bytes em memória (base64) para evitar problemas de URL pública
-      await updateJob(supabase, jobId, { status: 'critiquing', current_agent: 'Crítico Visual', progress_pct: 80 + attempt * 5 })
-
       try {
-        const critiquePromptImage = finalPngBytes
-          ? [{
-              role: 'user' as const,
-              content: [
-                { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/png' as const, data: Buffer.from(finalPngBytes).toString('base64') } },
-                { type: 'text' as const, text: `Você é um crítico visual RIGOROSO de criativos de marketing digital premium. Avalie e retorne APENAS JSON puro:
-{
-  "score": 0-10,
-  "passed": true ou false (score >= 8),
-  "issues": [
-    { "rule": "nome da regra violada", "severity": "high|medium|low", "suggestion": "instrução específica de como corrigir" }
-  ],
-  "praise": ["pontos positivos concretos"]
-}
-
-RUBRICA DE AVALIAÇÃO (cada critério vale 1 ponto, exceto ★★ que vale 2 e ✖ que é ELIMINATÓRIO):
-
-✖ [TEXTO_CORTADO] Examine CUIDADOSAMENTE cada palavra da headline, subline e CTA. Se QUALQUER palavra estiver cortada pela borda do canvas (letra faltando, texto saindo da imagem), isso é ELIMINATÓRIO: score máximo = 5, passed = false, severity = "high". Isso inclui texto parcialmente visível em qualquer borda.
-
-✖ [SOBREPOSICAO_TEXTO] Headline, subline, CTA e badges de preço/destaque NÃO podem se sobrepor uns aos outros. Texto em cima de texto = ELIMINATÓRIO: score máximo = 5, passed = false, severity = "high".
-
-★★ [PRODUTO_DOMINANTE] O produto ocupa ≥60% do espaço visual e é o primeiro elemento que o olho percebe. Se o produto estiver pequeno, lateral, ou competindo com texto, desconte 2 pontos. (severity: high se falhar)
-
-★★ [CONTRASTE_FUNDO_PRODUTO] O fundo contrasta fortemente com o produto — eles NÃO se "fundem". Fundo e produto de cores similares é falha GRAVE. (severity: high se falhar)
-
-[TEXTO_SOBRE_PRODUTO] Headline, subline e CTA estão em zonas que NÃO se sobrepõem ao produto. Texto sobre a imagem do produto = -1 ponto.
-
-[SOMBRA_PROFUNDIDADE] Produto tem sombra drop-shadow visível que o faz "flutuar" sobre o fundo, criando profundidade 3D.
-
-[HIERARQUIA_TIPOGRAFICA] Headline > subline > CTA em tamanho. O texto mais importante é o maior.
-
-[LEGIBILIDADE_2S] Em 2 segundos: produto identificado + headline lida integralmente + CTA visto. Texto deve ser legível e completo.
-
-[CTA_IMPACTANTE] Botão CTA tem cor de alto contraste, padding generoso, texto uppercase. É impossível não ver.
-
-[PREMIUM_FINISH] Design tem acabamento profissional: espaçamentos consistentes, alinhamentos corretos, elementos dentro das bordas.
-
-[PALETA_HARMONICA] Máx 3 cores visíveis dominantes. Regra 60-30-10 respeitada.
-
-[COPY_ADEQUADO] Headline impactante, subline complementar, CTA direto. Copy adequado ao nicho/produto.
-
-Briefing original: ${briefing}
-Copy esperado: ${JSON.stringify(copyOutput)}
-
-ATENÇÃO ESPECIAL: Olhe pixel a pixel para as bordas do canvas (especialmente direita e esquerda). Qualquer letra cortada = texto_cortado. Qualquer sobreposição de elementos textuais = sobreposicao_texto. Esses são os erros mais comuns e mais graves. Um criativo com texto cortado ou sobreposto NUNCA pode ter score ≥ 8.` }
-              ],
-            }]
-          : [{ role: 'user' as const, content: `Não foi possível renderizar a imagem. Retorne: {"score":5,"passed":false,"issues":[{"rule":"render_failed","severity":"high","suggestion":"Verificar HTML do designer"}],"praise":[]}` }]
-
         const critiqueRes = await anthropic.messages.create({
           model: 'claude-sonnet-4-6',
           max_tokens: 1024,
-          system: `Você é Ricardo, Crítico Visual sênior especialista em marketing digital.
-Avalie criativos com rigor profissional e retorne sempre JSON válido conforme solicitado.`,
-          messages: critiquePromptImage,
+          system: `Você é Ricardo, Crítico Visual sênior especialista em imagens publicitárias geradas por IA.
+Avalie e retorne APENAS JSON puro:
+{
+  "score": 0-100,
+  "passed": true,
+  "issues": [{ "rule": "", "severity": "high|medium|low", "suggestion": "" }],
+  "praise": []
+}`,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: imageResult.mimeType, data: currentImageBase64 } },
+              { type: 'text', text: `Avalie esta imagem publicitária gerada por IA com a seguinte rubrica (0-100):
+
+✖ CONTEUDO_PROIBIDO — Se qualquer elemento em forbidden_elements=[${creativeBrief.forbidden_elements.join(', ')}] aparecer na imagem: score máx 30, passed=false, severity=high
+
+✖ PRODUTO_AUSENTE — Produto foi fornecido mas NÃO aparece visivelmente na imagem: score máx 40, passed=false, severity=high
+   Tem produto: ${!!productImageUrl}
+
+QUALIDADE_VISUAL (0-20): Nitidez, sem artefatos de IA (dedos extras, texto distorcido, anatomia estranha), composição profissional
+
+ADERENCIA_BRIEFING (0-20): Bate com o estilo "${creativeBrief.visual_style}" e nicho "${creativeBrief.niche_key}"? Elementos requeridos presentes: [${creativeBrief.required_elements.join(', ')}]
+
+IMPACTO_MARKETING (0-20): Pararia o scroll num feed? Gera emoção "${creativeBrief.campaign_emotion}"?
+
+COPY_INTEGRATION (0-20): Imagem deixa espaço visual para texto? Composição suporta headline sobreposta?
+
+PREMIUM_FINISH (0-20): Parece foto profissional de agência ou imagem genérica de IA?
+
+passed = score >= 85
+
+Brief: nicho=${creativeBrief.niche_key}, archetype=${creativeBrief.archetype}, emoção=${creativeBrief.campaign_emotion}` },
+            ],
+          }],
         })
 
         const critiqueText = critiqueRes.content[0].type === 'text' ? critiqueRes.content[0].text : '{}'
-        critique = parseJson<Record<string, unknown>>(critiqueText, { score: 7, passed: false, issues: [] })
-        await updateJob(supabase, jobId, { critique })
+        critique = parseJson<Record<string, unknown>>(critiqueText, { score: 70, passed: false, issues: [] })
+        finalScore = typeof critique.score === 'number' ? critique.score : 70
+
+        await updateJob(supabase, jobId, {
+          critique,
+          visual_score: finalScore,
+          retry_count: retryCount,
+        })
+
+        if (critique.passed === true || attempt >= 2) break
+
+        // Regenerar com prompt refinado
+        retryCount = attempt + 1
+        await updateJob(supabase, jobId, {
+          status: 'regenerating',
+          current_agent: 'Image Generation IA (refinamento)',
+          retry_count: retryCount,
+          progress_pct: 93,
+        })
+
+        const issuesList = (critique.issues as Array<{ rule: string; suggestion: string }> ?? [])
+          .map(i => `- ${i.rule}: ${i.suggestion}`).join('\n')
+
+        const refinedPromptRes = await anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 400,
+          system: 'You are a Visual Prompt Engineer. Refine the image generation prompt based on critique feedback. Return ONLY the improved prompt text, no explanations.',
+          messages: [{
+            role: 'user',
+            content: `Original prompt: "${imagePrompt}"
+
+Issues to fix:
+${issuesList}
+
+Rewrite the prompt fixing these issues while keeping the original intent. Keep it 80-120 words.`,
+          }],
+        })
+
+        const refinedPrompt = refinedPromptRes.content[0].type === 'text'
+          ? refinedPromptRes.content[0].text.trim()
+          : imagePrompt
+
+        const newImageResult = await generateImage(refinedPrompt, contentType, W, H, productBase64ForGen)
+        const newUrl = await uploadGeneratedImage(
+          newImageResult.base64, newImageResult.mimeType, supabase, companyId, jobId, `_v${retryCount + 1}`
+        )
+
+        currentImageBase64 = newImageResult.base64
+        currentImageUrl = newUrl
+
+        await updateJob(supabase, jobId, {
+          generated_image_url: newUrl ?? currentImageUrl,
+          image_prompt: refinedPrompt,
+          status: 'visual_review',
+          current_agent: 'Crítico Visual',
+          progress_pct: 90,
+        })
+
       } catch (critiqueErr) {
-        // PNG inacessível para o modelo — aceitar arte sem crítica visual
-        console.warn('[studio] Crítico Visual falhou, aceitando arte:', critiqueErr)
-        critique = { score: 8, passed: true, issues: [], praise: ['Validação visual automática indisponível'] }
-        await updateJob(supabase, jobId, { critique })
+        console.warn('[studio] Visual Review falhou, aceitando imagem:', critiqueErr)
+        critique = { score: 85, passed: true, issues: [], praise: ['Validação visual automática indisponível'] }
+        finalScore = 85
+        await updateJob(supabase, jobId, { critique, visual_score: finalScore })
+        break
       }
-
-      if (critique.passed === true || attempt >= 2) break
-
-      // Autocorreção
-      correctionAttempts = attempt + 1
-      await updateJob(supabase, jobId, {
-        status: 'correcting',
-        current_agent: 'Designer HTML/CSS (autocorreção)',
-        correction_attempts: correctionAttempts,
-        progress_pct: 85,
-      })
-
-      const issuesList = (critique.issues as Array<{ rule: string; suggestion: string }> ?? [])
-        .map(i => `- ${i.rule}: ${i.suggestion}`).join('\n')
-
-      const correctionRes = await anthropic.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
-        system: designerSystemPrompt,
-        messages: productImageUrl
-          ? [{
-              role: 'user',
-              content: [
-                { type: 'image', source: { type: 'url', url: productImageUrl } },
-                { type: 'text', text: `ESTA IMAGEM É O PRODUTO: "${productImageUrl}"\n\nVocê criou este criativo HTML (${W}×${H}px) mas ele foi REPROVADO pelo Crítico Visual:\n\`\`\`html\n${finalHtml}\n\`\`\`\n\nCORREÇÕES OBRIGATÓRIAS:\n${issuesList}\n\nLEIS INVIOLÁVEIS NA CORREÇÃO:\n• TEXTO NUNCA CORTADO — toda div/p/h1 de texto DEVE ter max-width:${W - 2 * PAD}px; word-wrap:break-word. Nenhuma letra pode sair do canvas.\n• ZONAS SEPARADAS — headline, subline, badge de preço e CTA devem ter bounding boxes que NÃO se sobreponham\n• O produto (src="${productImageUrl}") DEVE ser o elemento visual dominante\n• Fundo e produto DEVEM contrastar fortemente\n• Padding mínimo ${PAD}px de todas as bordas para qualquer elemento\n• Drop-shadow no produto se tiver fundo transparente\n• HTML exatamente ${W}px × ${H}px; overflow:hidden\n\nEntregue APENAS entre \`\`\`html e \`\`\`. Zero texto fora do bloco.` }
-              ],
-            }]
-          : [{
-              role: 'user',
-              content: `Você criou este criativo (${W}×${H}px):\n\`\`\`html\n${finalHtml}\n\`\`\`\n\nCORREÇÕES EXIGIDAS:\n${issuesList}\n\nAplique as correções. HTML ${W}×${H}px. Apenas entre \`\`\`html e \`\`\`.`,
-            }],
-      })
-
-      let correctedHtml = extractHtml(correctionRes.content[0].type === 'text' ? correctionRes.content[0].text : '')
-      if (productImageUrl) correctedHtml = enforceProductImage(correctedHtml, productImageUrl)
-      finalHtml = wrapHtml(correctedHtml, W, H)
     }
 
-    // ── Finalizar job ────────────────────────────────────────
+    // ── Finalizar ────────────────────────────────────────────
     await updateJob(supabase, jobId, {
       status: 'done',
       current_agent: null,
       progress_pct: 100,
-      final_html: finalHtml,
-      final_png_url: finalPngUrl,
-      correction_attempts: correctionAttempts,
+      final_png_url: currentImageUrl,
+      generated_image_url: currentImageUrl,
+      retry_count: retryCount,
+      rejected_reason: critique.passed ? null : JSON.stringify(critique.issues),
     })
 
   } catch (err) {
