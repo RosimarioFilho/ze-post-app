@@ -356,7 +356,7 @@ body{width:${W}px;height:${H}px;overflow:hidden;position:relative;background:#00
 </style>
 </head>
 <body>
-<div class="bg"><img src="${imageUrl}" alt="arte" crossorigin="anonymous"></div>
+<div class="bg"><img src="${imageUrl}" alt="arte"></div>
 <div class="gradient"></div>
 <div class="content">
   <h1 class="headline">${esc(copy.headline)}</h1>

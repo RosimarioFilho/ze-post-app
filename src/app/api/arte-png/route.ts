@@ -31,11 +31,9 @@ export async function POST(req: NextRequest) {
 
     await page.setViewport({ width, height, deviceScaleFactor: 2 }) // @2x para alta resolução
 
-    // networkidle0 garante que todas as imagens externas (Supabase) e fontes carregam
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 45000 })
-
-    // Aguarda Google Fonts renderizarem completamente
-    await new Promise(r => setTimeout(r, 1000))
+    // 'load' dispara quando o DOM e recursos inline carregam; settle extra para imagens externas e fontes
+    await page.setContent(html, { waitUntil: 'load', timeout: 30000 })
+    await new Promise(r => setTimeout(r, 1500))
 
     const screenshot = await page.screenshot({
       type: 'png',
