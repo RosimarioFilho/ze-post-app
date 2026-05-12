@@ -190,7 +190,7 @@ export default function StudioPage() {
 
   const handleApprove = async () => {
     if (!company || isApproving) return
-    const imageUrl = job?.generated_image_url ?? job?.final_png_url
+    const imageUrl = job?.final_png_url ?? job?.generated_image_url
     if (!imageUrl) return
     const [W, H] = getSize(contentType)
     setIsApproving(true)
@@ -226,7 +226,7 @@ export default function StudioPage() {
   }
 
   const handleDownload = () => {
-    const imageUrl = job?.generated_image_url ?? job?.final_png_url
+    const imageUrl = job?.final_png_url ?? job?.generated_image_url
     if (!imageUrl) return
     const a = document.createElement('a')
     a.href = imageUrl
@@ -238,7 +238,8 @@ export default function StudioPage() {
   const currentStepIndex = job ? PIPELINE_STEPS.indexOf(job.status as CreativeJobStatus) : -1
   const critique = job?.critique
   const visualScore = job?.visual_score
-  const imageUrl = job?.generated_image_url ?? job?.final_png_url
+  // Prefer final_png_url (composite with text overlay) in review; fallback to raw AI image
+  const imageUrl = job?.final_png_url ?? job?.generated_image_url
 
   return (
     <div className="min-h-screen bg-slate-50">
