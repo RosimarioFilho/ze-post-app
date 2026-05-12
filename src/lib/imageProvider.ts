@@ -157,27 +157,33 @@ async function recraftImageGen(prompt: string, size: string): Promise<ImageResul
   return { base64, mimeType, provider: 'Recraft v3' }
 }
 
-// ── Provider: OpenAI DALL-E 3 ─────────────────────────────────
+// ── Provider: OpenAI gpt-image-1 ─────────────────────────────
+// gpt-image-1 suporta renderização de texto na imagem com precisão
 
 async function openaiImageGen(prompt: string, size: '1024x1024' | '1792x1024' | '1024x1792'): Promise<ImageResult> {
   const key = process.env.OPENAI_API_KEY!
+
+  // gpt-image-1 só aceita 1024x1024, 1536x1024 ou 1024x1536
+  const gptSize =
+    size === '1792x1024' ? '1536x1024'
+    : size === '1024x1792' ? '1024x1536'
+    : '1024x1024'
+
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'dall-e-3',
+      model: 'gpt-image-1',
       prompt,
       n: 1,
-      size,
-      response_format: 'b64_json',
-      quality: 'hd',
+      size: gptSize,
     }),
   })
-  if (!res.ok) throw new Error(`OpenAI DALL-E error ${res.status}: ${await res.text()}`)
+  if (!res.ok) throw new Error(`OpenAI gpt-image-1 error ${res.status}: ${await res.text()}`)
   const data = await res.json()
   const b64 = data.data?.[0]?.b64_json
   if (!b64) throw new Error('OpenAI: sem imagem na resposta')
-  return { base64: b64, mimeType: 'image/png', provider: 'OpenAI DALL-E 3' }
+  return { base64: b64, mimeType: 'image/png', provider: 'OpenAI gpt-image-1' }
 }
 
 // ── Main: provider selection ──────────────────────────────────

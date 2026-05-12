@@ -37,15 +37,15 @@ export async function POST(req: NextRequest) {
     })
 
     const page = await browser.newPage()
-    await page.setViewport({ width, height, deviceScaleFactor: 2 })
+    await page.setViewport({ width, height, deviceScaleFactor: 1 })
 
-    // Imagem já está embutida como base64 — só aguarda fontes e DOM
+    // Imagem já está embutida como base64 — só aguarda DOM e fontes
     await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 20000 })
-    await new Promise(r => setTimeout(r, 1200))
+    await new Promise(r => setTimeout(r, 1500))
 
     const screenshot = await page.screenshot({
       type: 'png',
-      clip: { x: 0, y: 0, width, height },
+      fullPage: false,
       omitBackground: false,
     })
 
