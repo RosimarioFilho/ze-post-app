@@ -3,15 +3,26 @@ import { NextRequest, NextResponse } from 'next/server'
 export const maxDuration = 60
 export const dynamic = 'force-dynamic'
 
-// Aumenta limite de body para HTML com imagens externas
-export const config = { api: { bodyParser: { sizeLimit: '16mb' } } }
-
 export async function POST(req: NextRequest) {
   try {
-    const { html, width = 1080, height = 1080 } = await req.json()
+    let { html, width = 1080, height = 1080 } = await req.json()
     if (!html) return NextResponse.json({ error: 'HTML obrigatório' }, { status: 400 })
 
-    // Import dinâmico para não quebrar o build em ambientes sem Chromium
+    // Baixa imagens externas (Supabase) server-side e converte para base64
+    // Evita que Chromium headless precise fazer requests externos
+    const imgMatch = html.match(/<img src="(https?:\/\/[^"]+)"/)
+    if (imgMatch) {
+      try {
+        const imgRes = await fetch(imgMatch[1])
+        if (imgRes.ok) {
+          const imgBuf = await imgRes.arrayBuffer()
+          const imgB64 = Buffer.from(imgBuf).toString('base64')
+          const imgMime = imgRes.headers.get('content-type') || 'image/jpeg'
+          html = html.replace(imgMatch[1], `data:${imgMime};base64,${imgB64}`)
+        }
+      } catch { /* usa URL original se download falhar */ }
+    }
+
     const puppeteer = (await import('puppeteer')).default
 
     const browser = await puppeteer.launch({
@@ -22,18 +33,15 @@ export async function POST(req: NextRequest) {
         '--disable-dev-shm-usage',
         '--disable-gpu',
         '--font-render-hinting=none',
-        '--disable-web-security',
-        '--allow-running-insecure-content',
       ],
     })
 
     const page = await browser.newPage()
+    await page.setViewport({ width, height, deviceScaleFactor: 2 })
 
-    await page.setViewport({ width, height, deviceScaleFactor: 2 }) // @2x para alta resolução
-
-    // 'load' dispara quando o DOM e recursos inline carregam; settle extra para imagens externas e fontes
-    await page.setContent(html, { waitUntil: 'load', timeout: 30000 })
-    await new Promise(r => setTimeout(r, 1500))
+    // Imagem já está embutida como base64 — só aguarda fontes e DOM
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 20000 })
+    await new Promise(r => setTimeout(r, 1200))
 
     const screenshot = await page.screenshot({
       type: 'png',

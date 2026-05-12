@@ -238,7 +238,8 @@ export default function StudioPage() {
   const currentStepIndex = job ? PIPELINE_STEPS.indexOf(job.status as CreativeJobStatus) : -1
   const critique = job?.critique
   const visualScore = job?.visual_score
-  const imageUrl = job?.generated_image_url ?? job?.final_png_url
+  // final_png_url = composite com texto; generated_image_url = imagem crua sem texto
+  const imageUrl = job?.final_png_url ?? job?.generated_image_url
 
   return (
     <div className="min-h-screen bg-slate-50">
