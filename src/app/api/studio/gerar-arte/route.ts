@@ -6,19 +6,26 @@ import { generateImage, uploadGeneratedImage, NoProviderError } from '@/lib/imag
 import type { CreativeBrief } from '@/types'
 
 // ── Retry (trata 529 overloaded e 500 transientes) ────────────
+// 5 tentativas, backoff exponencial com jitter: ~5s, 10s, 20s, 40s, 80s
 
-async function withRetry<T>(fn: () => Promise<T>, retries = 3, baseDelay = 2500): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, retries = 5, baseDelay = 5000): Promise<T> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       return await fn()
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      const isTransient = msg.includes('529') || msg.includes('overloaded') || msg.includes('529')
+      // Verifica status code via propriedade da SDK ou via texto da mensagem
+      const status = (err as { status?: number }).status
+      const isTransient =
+        status === 529 || status === 500 || status === 503
+        || msg.includes('529') || msg.includes('overloaded') || msg.includes('overloaded_error')
         || msg.includes('500') || msg.includes('503')
       if (isTransient && attempt < retries) {
-        const delay = baseDelay * Math.pow(2, attempt)
-        console.warn(`[studio] Anthropic overloaded, retry ${attempt + 1}/${retries} in ${delay}ms`)
-        await new Promise(r => setTimeout(r, delay))
+        // Jitter: delay base × 2^attempt + random 0-30%
+        const base = baseDelay * Math.pow(2, attempt)
+        const jitter = base * (0.7 + Math.random() * 0.3)
+        console.warn(`[studio] Anthropic overloaded (attempt ${attempt + 1}/${retries}), aguardando ${Math.round(jitter / 1000)}s...`)
+        await new Promise(r => setTimeout(r, jitter))
         continue
       }
       throw err
@@ -278,10 +285,10 @@ const NICHE_FONTS: Record<string, { family: string; importSlug: string; weight: 
 const DEFAULT_FONT = { family: 'Montserrat', importSlug: 'Montserrat:wght@400;700;900', weight: '700' }
 
 // ── Text Composite HTML builder ───────────────────────────────
+// Usa URL pública (não base64) para evitar limite de 4MB no body do Next.js
 
 function buildCompositeHtml(
-  imageBase64: string,
-  mimeType: string,
+  imageUrl: string,
   copy: { headline: string; subline: string; cta: string },
   palette: Record<string, string>,
   W: number, H: number,
@@ -293,7 +300,6 @@ function buildCompositeHtml(
   const PAD = Math.round(Math.min(W, H) * 0.065)
   const GAP = Math.round(PAD * 0.35)
 
-  // Font sizes relative to canvas
   const base = Math.min(W, H)
   const headlinePx = Math.round(base / (isVertical ? 9 : isSquare ? 8 : 10))
   const sublinePx  = Math.round(headlinePx * 0.50)
@@ -305,12 +311,7 @@ function buildCompositeHtml(
 
   const accent   = palette.accent ?? palette.cta_bg ?? '#fe7902'
   const ctaColor = palette.cta_text ?? '#ffffff'
-  const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpeg'
-
-  // Escape HTML entities
   const esc = (s: string) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-
-  // Gradient for text readability — stronger for vertical (stories), standard for square/horizontal
   const gradientHeight = isVertical ? '55%' : '45%'
   const gradientAlpha  = isVertical ? '0.92' : '0.85'
 
@@ -355,7 +356,7 @@ body{width:${W}px;height:${H}px;overflow:hidden;position:relative;background:#00
 </style>
 </head>
 <body>
-<div class="bg"><img src="data:image/${ext};base64,${imageBase64}" alt="arte"></div>
+<div class="bg"><img src="${imageUrl}" alt="arte" crossorigin="anonymous"></div>
 <div class="gradient"></div>
 <div class="content">
   <h1 class="headline">${esc(copy.headline)}</h1>
@@ -631,23 +632,26 @@ RULES:
     for (let attempt = 0; attempt <= 2; attempt++) {
       try {
         const critiqueRes = await withRetry(() => anthropic.messages.create({
-          model: 'claude-sonnet-4-6', max_tokens: 1024,
-          system: `Crítico Visual de imagens publicitárias geradas por IA. Retorne APENAS JSON puro:
+          model: 'claude-sonnet-4-6', max_tokens: 512,
+          system: `Avaliador de imagens publicitárias geradas por IA. Retorne APENAS JSON:
 {"score":0,"passed":false,"issues":[{"rule":"","severity":"high","suggestion":""}],"praise":[]}`,
           messages: [{ role: 'user', content: [
             { type: 'image', source: { type: 'base64', media_type: currentImageMime, data: currentImageBase64 } },
-            { type: 'text', text: `Avalie esta imagem publicitária (0-100):
+            { type: 'text', text: `Avalie esta imagem publicitária gerada por IA (escala 0-100):
 
-✖ CONTEUDO_PROIBIDO — elemento(s) [${creativeBrief.forbidden_elements.join(', ')}] presente(s): score máx 30, passed=false
-✖ PRODUTO_AUSENTE — produto foi informado mas NÃO aparece: score máx 40, passed=false (tem produto: ${!!productImageUrl})
+REGRAS DE REPROVAÇÃO IMEDIATA (score máx 20):
+- Conteúdo explicitamente proibido presente: [${creativeBrief.forbidden_elements.filter(e => ['criança','sensual','violência','álcool','nudez'].includes(e)).join(', ') || 'nenhum'}]
 
-QUALIDADE_VISUAL (0-20): nitidez, sem artefatos de IA (dedos distorcidos, texto ilegível na imagem)
-ADERENCIA_BRIEFING (0-20): bate com "${creativeBrief.visual_style}" e nicho "${niche}"? Elementos requeridos: [${creativeBrief.required_elements.join(', ')}]
-IMPACTO_MARKETING (0-20): pararia o scroll? gera emoção "${creativeBrief.campaign_emotion}"?
-ESPACO_TEXTO (0-20): imagem tem área escura/limpa no rodapé para receber texto overlay?
-PREMIUM_FINISH (0-20): parece foto profissional de agência?
+CRITÉRIOS DE QUALIDADE (some os pontos):
+- Qualidade técnica (0-30): imagem nítida, sem distorções graves, profissional
+- Estilo visual correto (0-25): combina com o nicho "${niche}" e estilo "${creativeBrief.visual_style}"?
+- Impacto visual (0-25): imagem atrativa que chama atenção?
+- Espaço para texto (0-20): há área escura/limpa no rodapé para texto overlay?
 
-passed = score >= 85` },
+IMPORTANTE: NÃO penalize por ausência de logos, badges, textos ou elementos específicos de marca — esses são adicionados na composição. Avalie apenas a cena fotográfica/artística.
+${!!productImageUrl ? `O briefing menciona um produto. Penalize APENAS se a imagem mostrar o tipo de produto completamente errado (ex: carro quando deveria ser comida).` : ''}
+
+passed = score >= 65` },
           ]}],
         }))
         const critiqueText = critiqueRes.content[0].type === 'text' ? critiqueRes.content[0].text : '{}'
@@ -694,20 +698,22 @@ passed = score >= 85` },
     }
 
     // ── Passo 10: Composição de texto sobre a imagem ──────────
-    // Sobrepõe headline + subline + CTA na imagem gerada via HTML/Puppeteer
+    // Usa URL pública do Supabase (não base64) para evitar limite de 4MB no body do Puppeteer
     let finalPngUrl = currentImageUrl // fallback: imagem sem texto
 
-    try {
-      const compositeHtml = buildCompositeHtml(
-        currentImageBase64, currentImageMime, copyOutput, palette, W, H, niche
-      )
-      const pngBytes = await renderHtmlToPng(compositeHtml, W, H, origin)
-      if (pngBytes) {
-        const compositeUrl = await uploadCompositePng(pngBytes, supabase, companyId, jobId)
-        if (compositeUrl) finalPngUrl = compositeUrl
+    if (currentImageUrl) {
+      try {
+        const compositeHtml = buildCompositeHtml(
+          currentImageUrl, copyOutput, palette, W, H, niche
+        )
+        const pngBytes = await renderHtmlToPng(compositeHtml, W, H, origin)
+        if (pngBytes) {
+          const compositeUrl = await uploadCompositePng(pngBytes, supabase, companyId, jobId)
+          if (compositeUrl) finalPngUrl = compositeUrl
+        }
+      } catch (compErr) {
+        console.warn('[studio] Composição de texto falhou, usando imagem sem texto:', compErr)
       }
-    } catch (compErr) {
-      console.warn('[studio] Composição de texto falhou, usando imagem sem texto:', compErr)
     }
 
     // ── Finalizar ─────────────────────────────────────────────

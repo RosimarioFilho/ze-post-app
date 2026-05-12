@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 export const maxDuration = 60
 export const dynamic = 'force-dynamic'
 
+// Aumenta limite de body para HTML com imagens externas
+export const config = { api: { bodyParser: { sizeLimit: '16mb' } } }
+
 export async function POST(req: NextRequest) {
   try {
     const { html, width = 1080, height = 1080 } = await req.json()
@@ -28,11 +31,11 @@ export async function POST(req: NextRequest) {
 
     await page.setViewport({ width, height, deviceScaleFactor: 2 }) // @2x para alta resolução
 
-    // networkidle2 = até 2 conexões pendentes (mais tolerante que networkidle0)
-    await page.setContent(html, { waitUntil: 'networkidle2', timeout: 30000 })
+    // networkidle0 garante que todas as imagens externas (Supabase) e fontes carregam
+    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 45000 })
 
-    // Aguarda Google Fonts renderizarem (necessário mesmo após networkidle0)
-    await new Promise(r => setTimeout(r, 600))
+    // Aguarda Google Fonts renderizarem completamente
+    await new Promise(r => setTimeout(r, 1000))
 
     const screenshot = await page.screenshot({
       type: 'png',
