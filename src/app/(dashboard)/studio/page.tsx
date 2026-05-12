@@ -1,5 +1,6 @@
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { CONTENT_TYPE_LABELS, CREATIVE_JOB_STATUS_LABELS, type CreativeJob, type CreativeJobStatus } from '@/types'
 import {
@@ -22,6 +23,15 @@ interface Company {
   name: string
   primary_color: string
   secondary_color: string
+}
+
+// ── Toast ─────────────────────────────────────────────────────
+function Toast({ msg }: { msg: string }) {
+  return (
+    <div className="fixed bottom-6 right-6 z-50 bg-green-600 text-white px-5 py-3 rounded-xl shadow-xl font-semibold text-sm animate-fade-in-up">
+      {msg}
+    </div>
+  )
 }
 
 // ── Art preview (iframe scaled) ───────────────────────────────
@@ -81,9 +91,31 @@ function ScoreBadge({ score }: { score: number }) {
   )
 }
 
+// ── Detectar transparência (Canvas API, client-side) ──────────
+async function detectarTransparencia(file: File): Promise<boolean> {
+  if (!file.type.includes('png')) return false
+  try {
+    const bitmap = await createImageBitmap(file)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.min(bitmap.width, 200)
+    canvas.height = Math.min(bitmap.height, 200)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return false
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] < 250) return true
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
 // ── Main Page ─────────────────────────────────────────────────
 export default function StudioPage() {
   const supabase = createClient()
+  const router = useRouter()
 
   // State
   const [pageState, setPageState] = useState<PageState>('form')
@@ -95,6 +127,7 @@ export default function StudioPage() {
   const [productPreview, setProductPreview] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [hasTransparentBg, setHasTransparentBg] = useState(false)
 
   const [jobId, setJobId] = useState<string | null>(null)
   const [job, setJob] = useState<Partial<CreativeJob> | null>(null)
@@ -104,6 +137,11 @@ export default function StudioPage() {
   const [showAjuste, setShowAjuste] = useState(false)
   const [isAjusting, setIsAjusting] = useState(false)
   const [showIssues, setShowIssues] = useState(false)
+
+  const [isDownloading, setIsDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+  const [isApproving, setIsApproving] = useState(false)
+  const [toastMsg, setToastMsg] = useState<string | null>(null)
 
   // Load company
   useEffect(() => {
@@ -126,6 +164,10 @@ export default function StudioPage() {
       const preview = URL.createObjectURL(file)
       setProductPreview(preview)
       setProductImage(file)
+
+      // Detectar transparência antes de enviar
+      const transparent = await detectarTransparencia(file)
+      setHasTransparentBg(transparent)
 
       const ext = file.name.split('.').pop() ?? 'jpg'
       const path = `${company.id}/ref-${Date.now()}.${ext}`
@@ -167,6 +209,7 @@ export default function StudioPage() {
           contentType,
           briefing,
           productImageUrl: productImageUrl ?? undefined,
+          hasTransparentBg,
         }),
       })
       const { jobId: id } = await res.json()
@@ -186,49 +229,72 @@ export default function StudioPage() {
 
   // Approve art
   const handleApprove = async () => {
-    if (!company || !job?.final_html) return
+    if (!company || !job?.final_html || isApproving) return
     const [W, H] = getSize(contentType)
-    const { data: content } = await supabase.from('contents').insert({
-      company_id: company.id,
-      title: `Studio: ${briefing.slice(0, 50)}`,
-      body: job.copy_output?.caption ?? briefing,
-      content_type: contentType,
-      platforms: [],
-      status: 'pendente_aprovacao',
-      media_urls: job.final_png_url ? [job.final_png_url] : [],
-      art_html: job.final_html,
-      art_width: W,
-      art_height: H,
-    }).select('id').single()
-
-    if (content?.id) {
-      await supabase.from('approvals').insert({
-        content_id: content.id,
+    setIsApproving(true)
+    try {
+      const { data: content } = await supabase.from('contents').insert({
         company_id: company.id,
-        status: 'pendente',
-      })
-      await supabase.from('creative_jobs').update({ content_id: content.id }).eq('id', jobId)
-      alert('Arte enviada para aprovação!')
+        title: `Studio: ${briefing.slice(0, 50)}`,
+        body: job.copy_output?.caption ?? briefing,
+        content_type: contentType,
+        platforms: [],
+        status: 'pendente_aprovacao',
+        media_urls: job.final_png_url ? [job.final_png_url] : [],
+        art_html: job.final_html,
+        art_width: W,
+        art_height: H,
+      }).select('id').single()
+
+      if (content?.id) {
+        await supabase.from('approvals').insert({
+          content_id: content.id,
+          company_id: company.id,
+          status: 'pendente',
+        })
+        await supabase.from('creative_jobs').update({ content_id: content.id }).eq('id', jobId)
+        setToastMsg('Arte aprovada! Já está na biblioteca.')
+        setTimeout(() => {
+          setToastMsg(null)
+          router.push('/conteudos')
+        }, 1800)
+      }
+    } finally {
+      setIsApproving(false)
     }
   }
 
   // Download PNG
   const handleDownload = async () => {
-    if (!job?.final_html) return
+    if (!job?.final_html || isDownloading) return
     const [W, H] = getSize(contentType)
-    const res = await fetch('/api/arte-png', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ html: job.final_html, width: W, height: H }),
-    })
-    if (!res.ok) return
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `arte-studio-${Date.now()}.png`
-    a.click()
-    URL.revokeObjectURL(url)
+    setIsDownloading(true)
+    setDownloadError(null)
+    try {
+      const res = await fetch('/api/arte-png', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html: job.final_html, width: W, height: H }),
+      })
+      if (!res.ok) {
+        const errText = await res.text().catch(() => 'Erro desconhecido')
+        setDownloadError('Falha ao gerar PNG. Tente novamente.')
+        console.error('[studio] download error:', errText)
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `arte-studio-${Date.now()}.png`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('[studio] download error:', err)
+      setDownloadError('Falha ao gerar PNG. Tente novamente.')
+    } finally {
+      setIsDownloading(false)
+    }
   }
 
   // Adjust art
@@ -266,6 +332,7 @@ export default function StudioPage() {
   // ── Render ────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-50">
+      {toastMsg && <Toast msg={toastMsg} />}
       <div className="max-w-5xl mx-auto px-6 py-8">
         {/* Header */}
         <div className="mb-8">
@@ -292,7 +359,7 @@ export default function StudioPage() {
                   <div className="relative">
                     <img src={productPreview} alt="produto" className="w-full h-48 object-contain rounded-xl bg-slate-50 border border-slate-200" />
                     <button
-                      onClick={() => { setProductImage(null); setProductImageUrl(null); setProductPreview(null) }}
+                      onClick={() => { setProductImage(null); setProductImageUrl(null); setProductPreview(null); setHasTransparentBg(false) }}
                       className="absolute top-2 right-2 bg-white rounded-full p-1 shadow border border-slate-200 hover:bg-red-50"
                     >
                       <X className="w-4 h-4 text-slate-500" />
@@ -300,6 +367,19 @@ export default function StudioPage() {
                     {isUploading && (
                       <div className="absolute inset-0 bg-white/70 rounded-xl flex items-center justify-center">
                         <Loader2 className="w-6 h-6 animate-spin text-ze-blue" />
+                      </div>
+                    )}
+                    {!isUploading && (
+                      <div className="mt-2">
+                        {hasTransparentBg ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
+                            <CheckCircle2 className="w-3 h-3" /> Fundo já transparente — remoção pulada
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-full">
+                            <Sparkles className="w-3 h-3" /> Fundo será removido automaticamente
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
@@ -552,19 +632,25 @@ export default function StudioPage() {
                 <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
                   <button
                     onClick={handleApprove}
-                    className="w-full py-3 rounded-xl bg-green-500 text-white font-bold text-sm flex items-center justify-center gap-2 hover:bg-green-600 transition-colors"
+                    disabled={isApproving}
+                    className="w-full py-3 rounded-xl bg-green-500 text-white font-bold text-sm flex items-center justify-center gap-2 hover:bg-green-600 transition-colors disabled:opacity-60"
                   >
-                    <CheckCircle2 className="w-4 h-4" />
-                    Aprovar Arte
+                    {isApproving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    {isApproving ? 'Aprovando...' : 'Aprovar Arte'}
                   </button>
 
                   <button
                     onClick={handleDownload}
-                    className="w-full py-3 rounded-xl bg-ze-blue text-white font-bold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+                    disabled={isDownloading}
+                    className="w-full py-3 rounded-xl bg-ze-blue text-white font-bold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-60"
                   >
-                    <Download className="w-4 h-4" />
-                    Download PNG
+                    {isDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                    {isDownloading ? 'Gerando PNG...' : 'Download PNG'}
                   </button>
+
+                  {downloadError && (
+                    <p className="text-xs text-red-500 font-medium text-center">{downloadError}</p>
+                  )}
 
                   <button
                     onClick={() => setShowAjuste(v => !v)}

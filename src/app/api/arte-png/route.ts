@@ -18,7 +18,9 @@ export async function POST(req: NextRequest) {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
-        '--font-render-hinting=none', // melhor renderização de fontes
+        '--font-render-hinting=none',
+        '--disable-web-security',
+        '--allow-running-insecure-content',
       ],
     })
 
@@ -26,8 +28,8 @@ export async function POST(req: NextRequest) {
 
     await page.setViewport({ width, height, deviceScaleFactor: 2 }) // @2x para alta resolução
 
-    // Injeta o HTML e espera fonts + imagens (networkidle0 = nenhuma req de rede por 500ms)
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 })
+    // networkidle2 = até 2 conexões pendentes (mais tolerante que networkidle0)
+    await page.setContent(html, { waitUntil: 'networkidle2', timeout: 30000 })
 
     // Aguarda Google Fonts renderizarem (necessário mesmo após networkidle0)
     await new Promise(r => setTimeout(r, 600))

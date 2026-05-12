@@ -45,6 +45,44 @@ async function updateJob(
   await supabase.from('creative_jobs').update(data).eq('id', jobId)
 }
 
+// ── Contextual Unsplash image search ─────────────────────────
+
+async function searchContextualUnsplashImage(briefing: string, niche?: string): Promise<string> {
+  const key = process.env.UNSPLASH_ACCESS_KEY
+  const fallbacks: Record<string, string> = {
+    automotivo: 'photo-1503376780353-7e6692767b70',
+    tecnologia: 'photo-1496181133206-80ce9b88a853',
+    alimentação: 'photo-1565299624946-b28f40a0ae38',
+    moda: 'photo-1558769132-cb1aea458c5e',
+    fitness: 'photo-1517836357463-d25dfeac3438',
+    negócios: 'photo-1507003211169-0a1dd7228f2d',
+  }
+
+  if (key) {
+    try {
+      const query = encodeURIComponent(`${niche ?? ''} ${briefing}`.slice(0, 60).trim())
+      const res = await fetch(
+        `https://api.unsplash.com/search/photos?query=${query}&per_page=1&orientation=landscape`,
+        { headers: { Authorization: `Client-ID ${key}` } }
+      )
+      if (res.ok) {
+        const data = await res.json()
+        const photo = data.results?.[0]
+        if (photo?.urls?.raw) {
+          return `${photo.urls.raw}&w=1200&q=90&auto=format&fit=crop`
+        }
+      }
+    } catch (err) {
+      console.warn('[studio] Unsplash search failed, using fallback:', err)
+    }
+  }
+
+  // Fallback por nicho
+  const nichoKey = Object.keys(fallbacks).find(k => (niche ?? briefing).toLowerCase().includes(k))
+  const photoId = nichoKey ? fallbacks[nichoKey] : fallbacks['negócios']
+  return `https://images.unsplash.com/${photoId}?w=1200&q=90&auto=format&fit=crop`
+}
+
 // ── Background Removal (Remove.bg) ───────────────────────────
 
 async function removeBackground(imageUrl: string): Promise<string | null> {
@@ -172,7 +210,7 @@ export async function POST(req: NextRequest) {
   const apiKey = readApiKey()
   if (!apiKey) return NextResponse.json({ error: 'ANTHROPIC_API_KEY não configurada' }, { status: 500 })
 
-  const { companyId, contentType, briefing, productImageUrl } = await req.json()
+  const { companyId, contentType, briefing, productImageUrl, hasTransparentBg } = await req.json()
   if (!companyId || !contentType || !briefing) {
     return NextResponse.json({ error: 'companyId, contentType e briefing são obrigatórios' }, { status: 400 })
   }
@@ -200,7 +238,7 @@ export async function POST(req: NextRequest) {
 
   // Executar pipeline de forma assíncrona (não bloqueia a resposta)
   const origin = req.nextUrl.origin
-  runPipeline({ jobId, companyId, contentType, briefing, productImageUrl, supabase, anthropic: new Anthropic({ apiKey }), origin }).catch(err => {
+  runPipeline({ jobId, companyId, contentType, briefing, productImageUrl, hasTransparentBg: !!hasTransparentBg, supabase, anthropic: new Anthropic({ apiKey }), origin }).catch(err => {
     console.error('[studio] pipeline fatal error:', err)
     supabase.from('creative_jobs').update({ status: 'failed', error_message: String(err) }).eq('id', jobId)
   })
@@ -216,13 +254,14 @@ interface PipelineCtx {
   contentType: string
   briefing: string
   productImageUrl?: string
+  hasTransparentBg?: boolean
   supabase: Awaited<ReturnType<typeof createClient>>
   anthropic: Anthropic
   origin: string
 }
 
 async function runPipeline(ctx: PipelineCtx) {
-  const { jobId, companyId, contentType, briefing, supabase, anthropic, origin } = ctx
+  const { jobId, companyId, contentType, briefing, hasTransparentBg, supabase, anthropic, origin } = ctx
   let { productImageUrl } = ctx
 
   const [W, H] = AR_SIZES[contentType] ?? [1080, 1080]
@@ -245,10 +284,12 @@ async function runPipeline(ctx: PipelineCtx) {
     // ── Passo 1: Background Removal ─────────────────────────
     if (productImageUrl) {
       await updateJob(supabase, jobId, { status: 'bg_removing', current_agent: 'Background Remover', progress_pct: 5 })
-      const nobgUrl = await removeBackgroundAndUpload(productImageUrl, supabase, companyId, jobId)
-      if (nobgUrl) {
-        productImageUrl = nobgUrl
-        await updateJob(supabase, jobId, { product_image_nobg_url: nobgUrl })
+      if (!hasTransparentBg) {
+        const nobgUrl = await removeBackgroundAndUpload(productImageUrl, supabase, companyId, jobId)
+        if (nobgUrl) {
+          productImageUrl = nobgUrl
+          await updateJob(supabase, jobId, { product_image_nobg_url: nobgUrl })
+        }
       }
     }
 
@@ -503,6 +544,9 @@ REGRAS ABSOLUTAS (violá-las invalida o trabalho):
 9. URL DO PRODUTO SAGRADA. A URL fornecida vai no src do img. Jamais substitua por outra imagem.
 10. HTML COMPLETO. position:absolute em tudo. body: width:${W}px; height:${H}px; overflow:hidden; position:relative; margin:0; padding:0.`
 
+    // Buscar imagem contextual Unsplash quando não há produto
+    const contextualImageUrl = productImageUrl ? null : await searchContextualUnsplashImage(briefing, niche)
+
     const designerUserPrompt = productImageUrl
       ? `═══ CRIATIVO ${W}×${H}px | ${isVertical ? 'STORIES/REELS' : isSquare ? 'POST QUADRADO' : 'HORIZONTAL'} ═══
 
@@ -547,14 +591,9 @@ COPY:
 • Subline: "${copyOutput.subline}"
 • CTA: "${copyOutput.cta}"
 
-SEM IMAGEM DO PRODUTO — use uma foto Unsplash temática de alta qualidade:
-• Automotivo: https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=1200&q=90&auto=format&fit=crop
-• Tecnologia: https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=1200&q=90&auto=format&fit=crop
-• Alimentação: https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=1200&q=90&auto=format&fit=crop
-• Moda/Beleza: https://images.unsplash.com/photo-1558769132-cb1aea458c5e?w=1200&q=90&auto=format&fit=crop
-• Fitness: https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=1200&q=90&auto=format&fit=crop
-• Negócios: https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=1200&q=90&auto=format&fit=crop
-Escolha a mais adequada para: ${briefing.slice(0, 80)}
+SEM IMAGEM DO PRODUTO — use esta foto temática contextual como elemento visual:
+URL DA FOTO (copie exatamente no src): "${contextualImageUrl}"
+Use EXATAMENTE esta URL. NÃO substitua por outra imagem.
 
 ${layoutGuide}
 
@@ -562,6 +601,10 @@ TIPOGRAFIA — @import url('https://fonts.googleapis.com/css2?family=${primaryFo
 • Headline: ${headlinePx}px | weight:900 | uppercase
 • Subline: ${sublinePx}px | weight:400
 • CTA: ${ctaPx}px | weight:700 | uppercase | letter-spacing:0.06em
+
+CHECKLIST:
+□ <img src="${contextualImageUrl}"> está no HTML?
+□ HTML tem width:${W}px e height:${H}px?
 
 Entregue APENAS o bloco \`\`\`html ... \`\`\`.`
 
