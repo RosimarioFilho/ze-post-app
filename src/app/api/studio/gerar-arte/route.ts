@@ -64,25 +64,122 @@ async function updateJob(
   await supabase.from('creative_jobs').update(data).eq('id', jobId)
 }
 
-// ── Render via Puppeteer (/api/arte-png) ──────────────────────
+// ── Sharp Composite (text overlay server-side) ────────────────
 
-async function renderHtmlToPng(html: string, W: number, H: number, origin: string): Promise<ArrayBuffer | null> {
+function wrapText(text: string, maxWidth: number, fontSize: number, charWidth = 0.55): string[] {
+  const charsPerLine = Math.floor(maxWidth / (fontSize * charWidth))
+  const words = text.split(' ')
+  const lines: string[] = []
+  let current = ''
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word
+    if (next.length > charsPerLine && current) {
+      lines.push(current)
+      current = word
+    } else {
+      current = next
+    }
+  }
+  if (current) lines.push(current)
+  return lines
+}
+
+async function sharpComposite(
+  imageBase64: string,
+  copy: { headline: string; subline: string; cta: string },
+  palette: Record<string, string>,
+  W: number, H: number,
+): Promise<Buffer | null> {
   try {
-    const res = await fetch(`${origin}/api/arte-png`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ html, width: W, height: H }),
-    })
-    if (!res.ok) return null
-    return await res.arrayBuffer()
+    const { default: sharp } = await import('sharp')
+    const imageBuffer = Buffer.from(imageBase64, 'base64')
+
+    const isVertical = H / W >= 1.4
+    const isSquare = Math.abs(H / W - 1) < 0.15
+    const base = Math.min(W, H)
+    const PAD = Math.round(base * 0.065)
+    const GAP = Math.round(PAD * 0.35)
+    const headlinePx = Math.round(base / (isVertical ? 14 : isSquare ? 14 : 16))
+    const sublinePx  = Math.round(headlinePx * 0.50)
+    const ctaPx      = Math.round(headlinePx * 0.38)
+    const maxTextW   = W - PAD * 2
+    const accent     = palette.accent ?? palette.cta_bg ?? '#fe7902'
+    const ctaColor   = palette.cta_text ?? '#ffffff'
+
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const headlineLines = wrapText(copy.headline.toUpperCase(), maxTextW, headlinePx, 0.60)
+    const sublineLines  = wrapText(copy.subline, maxTextW, sublinePx, 0.52)
+
+    const headLineH  = Math.round(headlinePx * 1.05)
+    const subLineH   = Math.round(sublinePx  * 1.35)
+    const ctaPadV    = Math.round(ctaPx * 0.65)
+    const ctaPadH    = Math.round(ctaPx * 1.5)
+    const ctaBoxH    = Math.round(ctaPx + ctaPadV * 2)
+    const ctaBorderR = Math.round(ctaPx * 0.4)
+
+    const textBlockH =
+      headlineLines.length * headLineH
+      + GAP
+      + (sublineLines.length > 0 ? sublineLines.length * subLineH + Math.round(GAP * 1.8) : 0)
+      + ctaBoxH
+
+    let y = H - PAD - textBlockH
+    const gradientPct = Math.max(0, Math.round(((y - PAD * 2) / H) * 100))
+    const gradientAlpha = isVertical ? '0.92' : '0.85'
+
+    const svgParts: string[] = []
+
+    for (const line of headlineLines) {
+      svgParts.push(
+        `<text x="${PAD}" y="${y + Math.round(headlinePx * 0.82)}"` +
+        ` font-family="Arial Black,Arial,sans-serif" font-size="${headlinePx}" font-weight="900"` +
+        ` fill="white" letter-spacing="-1">${esc(line)}</text>`
+      )
+      y += headLineH
+    }
+    y += GAP
+
+    for (const line of sublineLines) {
+      svgParts.push(
+        `<text x="${PAD}" y="${y + Math.round(sublinePx * 0.82)}"` +
+        ` font-family="Arial,sans-serif" font-size="${sublinePx}"` +
+        ` fill="rgba(255,255,255,0.9)">${esc(line)}</text>`
+      )
+      y += subLineH
+    }
+    if (sublineLines.length > 0) y += Math.round(GAP * 1.8)
+
+    const ctaBoxW = Math.round(copy.cta.length * ctaPx * 0.52 + ctaPadH * 2)
+    svgParts.push(
+      `<rect x="${PAD}" y="${y}" width="${ctaBoxW}" height="${ctaBoxH}"` +
+      ` rx="${ctaBorderR}" ry="${ctaBorderR}" fill="${accent}"/>`,
+      `<text x="${PAD + Math.round(ctaBoxW / 2)}" y="${y + Math.round(ctaBoxH * 0.67)}"` +
+      ` font-family="Arial,sans-serif" font-size="${ctaPx}" font-weight="700"` +
+      ` fill="${ctaColor}" text-anchor="middle" letter-spacing="1">${esc(copy.cta.toUpperCase())}</text>`
+    )
+
+    const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="${gradientPct}%" stop-color="transparent"/>
+  <stop offset="100%" stop-color="rgba(0,0,0,${gradientAlpha})"/>
+</linearGradient></defs>
+<rect width="${W}" height="${H}" fill="url(#g)"/>
+${svgParts.join('\n')}
+</svg>`
+
+    return await sharp(imageBuffer)
+      .resize(W, H, { fit: 'cover', position: 'centre' })
+      .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+      .png()
+      .toBuffer()
   } catch (err) {
-    console.warn('[studio] renderHtmlToPng error:', err)
+    console.warn('[studio] sharp composite error:', err)
     return null
   }
 }
 
 async function uploadCompositePng(
-  pngBytes: ArrayBuffer,
+  pngBytes: Buffer,
   supabase: Awaited<ReturnType<typeof createClient>>,
   companyId: string,
   jobId: string,
@@ -264,109 +361,6 @@ const NICHE_ARCHETYPES: Record<string, {
   },
 }
 
-// ── Niche font mapping ────────────────────────────────────────
-
-const NICHE_FONTS: Record<string, { family: string; importSlug: string; weight: string }> = {
-  academia:    { family: 'Barlow Condensed', importSlug: 'Barlow+Condensed:wght@400;700;900', weight: '900' },
-  infantil:    { family: 'Nunito', importSlug: 'Nunito:wght@400;700;800', weight: '800' },
-  luxo:        { family: 'Playfair Display', importSlug: 'Playfair+Display:wght@400;700', weight: '700' },
-  politica:    { family: 'Oswald', importSlug: 'Oswald:wght@400;700', weight: '700' },
-  offroad:     { family: 'Barlow Condensed', importSlug: 'Barlow+Condensed:wght@400;700;900', weight: '900' },
-  tecnologia:  { family: 'Space Grotesk', importSlug: 'Space+Grotesk:wght@400;700', weight: '700' },
-  eventos:     { family: 'Bebas Neue', importSlug: 'Bebas+Neue', weight: '400' },
-  beleza:      { family: 'Cormorant Garamond', importSlug: 'Cormorant+Garamond:wght@400;600', weight: '600' },
-  alimentacao: { family: 'Poppins', importSlug: 'Poppins:wght@400;700;800', weight: '800' },
-  servicos:    { family: 'Montserrat', importSlug: 'Montserrat:wght@400;700;900', weight: '700' },
-  imobiliaria: { family: 'Raleway', importSlug: 'Raleway:wght@400;600;700', weight: '600' },
-  educacao:    { family: 'Nunito', importSlug: 'Nunito:wght@400;700;800', weight: '800' },
-  ecommerce:   { family: 'Anton', importSlug: 'Anton', weight: '400' },
-  moda:        { family: 'Raleway', importSlug: 'Raleway:wght@300;400;600', weight: '600' },
-}
-const DEFAULT_FONT = { family: 'Montserrat', importSlug: 'Montserrat:wght@400;700;900', weight: '700' }
-
-// ── Text Composite HTML builder ───────────────────────────────
-// Usa URL pública (não base64) para evitar limite de 4MB no body do Next.js
-
-function buildCompositeHtml(
-  imageUrl: string,
-  copy: { headline: string; subline: string; cta: string },
-  palette: Record<string, string>,
-  W: number, H: number,
-  niche: string,
-): string {
-  const font = NICHE_FONTS[niche] ?? DEFAULT_FONT
-  const isVertical = H / W >= 1.4
-  const isSquare = Math.abs(H / W - 1) < 0.15
-  const PAD = Math.round(Math.min(W, H) * 0.065)
-  const GAP = Math.round(PAD * 0.35)
-
-  const base = Math.min(W, H)
-  const headlinePx = Math.round(base / (isVertical ? 9 : isSquare ? 8 : 10))
-  const sublinePx  = Math.round(headlinePx * 0.50)
-  const ctaPx      = Math.round(headlinePx * 0.38)
-  const ctaPadV    = Math.round(ctaPx * 0.65)
-  const ctaPadH    = Math.round(ctaPx * 1.5)
-  const borderR    = Math.round(ctaPx * 0.4)
-  const maxTextW   = W - PAD * 2
-
-  const accent   = palette.accent ?? palette.cta_bg ?? '#fe7902'
-  const ctaColor = palette.cta_text ?? '#ffffff'
-  const esc = (s: string) => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-  const gradientHeight = isVertical ? '55%' : '45%'
-  const gradientAlpha  = isVertical ? '0.92' : '0.85'
-
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=${font.importSlug}&display=swap" rel="stylesheet">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{width:${W}px;height:${H}px;overflow:hidden;position:relative;background:#000}
-.bg{position:absolute;inset:0;z-index:1}
-.bg img{width:100%;height:100%;object-fit:cover;display:block}
-.gradient{position:absolute;bottom:0;left:0;right:0;height:${gradientHeight};z-index:2;
-  background:linear-gradient(to bottom,transparent 0%,rgba(0,0,0,${gradientAlpha}) 100%)}
-.content{position:absolute;bottom:${PAD}px;left:${PAD}px;right:${PAD}px;z-index:3}
-.headline{
-  font-family:'${font.family}',Arial Black,Arial,sans-serif;
-  font-size:${headlinePx}px;font-weight:${font.weight};
-  color:#ffffff;text-transform:uppercase;
-  letter-spacing:-0.02em;line-height:0.95;
-  margin-bottom:${GAP}px;
-  text-shadow:0 3px 30px rgba(0,0,0,0.8),0 1px 4px rgba(0,0,0,0.9);
-  max-width:${maxTextW}px;word-wrap:break-word;overflow-wrap:break-word}
-.subline{
-  font-family:'${font.family}',Arial,sans-serif;
-  font-size:${sublinePx}px;font-weight:400;
-  color:rgba(255,255,255,0.90);line-height:1.3;
-  margin-bottom:${Math.round(GAP * 1.8)}px;
-  text-shadow:0 2px 16px rgba(0,0,0,0.7);
-  max-width:${maxTextW}px;word-wrap:break-word;overflow-wrap:break-word}
-.cta{
-  display:inline-block;
-  font-family:'${font.family}',Arial,sans-serif;
-  font-size:${ctaPx}px;font-weight:700;
-  color:${ctaColor};background:${accent};
-  padding:${ctaPadV}px ${ctaPadH}px;
-  border-radius:${borderR}px;
-  text-transform:uppercase;letter-spacing:0.06em;
-  text-shadow:none;box-shadow:0 4px 20px rgba(0,0,0,0.4)}
-</style>
-</head>
-<body>
-<div class="bg"><img src="${imageUrl}" alt="arte"></div>
-<div class="gradient"></div>
-<div class="content">
-  <h1 class="headline">${esc(copy.headline)}</h1>
-  ${copy.subline ? `<p class="subline">${esc(copy.subline)}</p>` : ''}
-  <div class="cta">${esc(copy.cta)}</div>
-</div>
-</body>
-</html>`
-}
-
 // ── Main Orchestration ────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
@@ -390,9 +384,8 @@ export async function POST(req: NextRequest) {
   if (jobErr || !job) return NextResponse.json({ error: 'Erro ao criar job' }, { status: 500 })
 
   const jobId = job.id
-  const origin = req.nextUrl.origin
 
-  runPipeline({ jobId, companyId, contentType, briefing, productImageUrl, hasTransparentBg: !!hasTransparentBg, referenceImageUrl, supabase, anthropic: new Anthropic({ apiKey }), origin })
+  runPipeline({ jobId, companyId, contentType, briefing, productImageUrl, hasTransparentBg: !!hasTransparentBg, referenceImageUrl, supabase, anthropic: new Anthropic({ apiKey }) })
     .catch(err => {
       console.error('[studio] pipeline fatal error:', err)
       supabase.from('creative_jobs').update({ status: 'failed', error_message: String(err) }).eq('id', jobId)
@@ -406,11 +399,11 @@ export async function POST(req: NextRequest) {
 interface PipelineCtx {
   jobId: string; companyId: string; contentType: string; briefing: string
   productImageUrl?: string; hasTransparentBg?: boolean; referenceImageUrl?: string
-  supabase: Awaited<ReturnType<typeof createClient>>; anthropic: Anthropic; origin: string
+  supabase: Awaited<ReturnType<typeof createClient>>; anthropic: Anthropic
 }
 
 async function runPipeline(ctx: PipelineCtx) {
-  const { jobId, companyId, contentType, briefing, hasTransparentBg, referenceImageUrl, supabase, anthropic, origin } = ctx
+  const { jobId, companyId, contentType, briefing, hasTransparentBg, referenceImageUrl, supabase, anthropic } = ctx
   let { productImageUrl } = ctx
 
   const [W, H] = AR_SIZES[contentType] ?? [1080, 1080]
@@ -521,7 +514,11 @@ async function runPipeline(ctx: PipelineCtx) {
       model: 'claude-haiku-4-5-20251001', max_tokens: 512,
       system: `Retorne APENAS JSON puro:
 {"headline":"","subline":"","cta":"","caption":""}
-Headline máx 8 palavras impactantes. Subline máx 10 palavras. CTA 2-3 palavras diretas. Caption com emojis e hashtags.`,
+REGRAS OBRIGATÓRIAS:
+- Headline: máximo 4 palavras fortes (máx 22 caracteres). O produto é o destaque visual — a headline complementa, não domina.
+- Subline: máx 8 palavras, uma frase de benefício.
+- CTA: 2-3 palavras diretas.
+- Caption: texto para legenda com emojis e hashtags.`,
       messages: [{ role: 'user', content: `Estratégia: ${JSON.stringify(strategy)}\nBriefing: ${briefing}\nEmpresa: ${companyName}\nCTAs da marca: ${preferredCtas}\nNicho: ${niche}` }],
     }))
     const copyOutput = parseJson<{ headline: string; subline: string; cta: string; caption: string }>(
@@ -699,18 +696,16 @@ passed = score >= 65` },
       }
     }
 
-    // ── Passo 10: Composição de texto sobre a imagem ──────────
-    // Usa URL pública do Supabase (não base64) para evitar limite de 4MB no body do Puppeteer
+    // ── Passo 10: Composição de texto sobre a imagem (sharp) ─────
     let finalPngUrl = currentImageUrl // fallback: imagem sem texto
 
-    if (currentImageUrl) {
+    if (currentImageBase64) {
       try {
-        const compositeHtml = buildCompositeHtml(
-          currentImageUrl, copyOutput, palette, W, H, niche
+        const compositeBuffer = await sharpComposite(
+          currentImageBase64, copyOutput, palette, W, H
         )
-        const pngBytes = await renderHtmlToPng(compositeHtml, W, H, origin)
-        if (pngBytes) {
-          const compositeUrl = await uploadCompositePng(pngBytes, supabase, companyId, jobId)
+        if (compositeBuffer) {
+          const compositeUrl = await uploadCompositePng(compositeBuffer, supabase, companyId, jobId)
           if (compositeUrl) finalPngUrl = compositeUrl
         }
       } catch (compErr) {

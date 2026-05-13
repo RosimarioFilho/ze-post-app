@@ -5,23 +5,8 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   try {
-    let { html, width = 1080, height = 1080 } = await req.json()
+    const { html, width = 1080, height = 1080 } = await req.json()
     if (!html) return NextResponse.json({ error: 'HTML obrigatório' }, { status: 400 })
-
-    // Baixa imagens externas (Supabase) server-side e converte para base64
-    // Evita que Chromium headless precise fazer requests externos
-    const imgMatch = html.match(/<img src="(https?:\/\/[^"]+)"/)
-    if (imgMatch) {
-      try {
-        const imgRes = await fetch(imgMatch[1])
-        if (imgRes.ok) {
-          const imgBuf = await imgRes.arrayBuffer()
-          const imgB64 = Buffer.from(imgBuf).toString('base64')
-          const imgMime = imgRes.headers.get('content-type') || 'image/jpeg'
-          html = html.replace(imgMatch[1], `data:${imgMime};base64,${imgB64}`)
-        }
-      } catch { /* usa URL original se download falhar */ }
-    }
 
     const puppeteer = (await import('puppeteer')).default
 
@@ -39,8 +24,8 @@ export async function POST(req: NextRequest) {
     const page = await browser.newPage()
     await page.setViewport({ width, height, deviceScaleFactor: 1 })
 
-    // Imagem já está embutida como base64 — só aguarda DOM e fontes
-    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 20000 })
+    // networkidle2: aguarda imagem do Supabase carregar antes de tirar screenshot
+    await page.setContent(html, { waitUntil: 'networkidle2', timeout: 30000 })
     await new Promise(r => setTimeout(r, 1500))
 
     const screenshot = await page.screenshot({

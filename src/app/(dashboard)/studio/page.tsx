@@ -460,7 +460,7 @@ export default function StudioPage() {
               <h2 className="font-bold text-slate-800 mb-4">Preview</h2>
               {imageUrl ? (
                 <div className="bg-slate-50 rounded-xl overflow-hidden flex items-center justify-center">
-                  <img src={imageUrl} alt="arte gerada" className="max-w-full max-h-96 object-contain" />
+                  <img src={imageUrl} alt="arte gerada" className="max-w-full max-h-96 object-contain" onError={e => { const fb = job?.generated_image_url; if (fb && e.currentTarget.src !== fb) e.currentTarget.src = fb }} />
                 </div>
               ) : (
                 <div className="aspect-square bg-slate-50 rounded-xl flex flex-col items-center justify-center gap-3">
@@ -492,7 +492,7 @@ export default function StudioPage() {
                   </div>
 
                   {imageUrl ? (
-                    <img src={imageUrl} alt="arte gerada" className="w-full rounded-xl shadow-sm" />
+                    <img src={imageUrl} alt="arte gerada" className="w-full rounded-xl shadow-sm" onError={e => { const fb = job?.generated_image_url; if (fb && e.currentTarget.src !== fb) e.currentTarget.src = fb }} />
                   ) : (
                     <div className="aspect-square bg-slate-100 rounded-xl flex items-center justify-center">
                       <p className="text-slate-400 text-sm">Imagem não disponível</p>
