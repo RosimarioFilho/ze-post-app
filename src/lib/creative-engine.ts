@@ -1393,7 +1393,7 @@ export function getLogoPlacement(layout: Layout, W: number, H: number): LogoPlac
   const safeH   = Math.round(W * 0.07)   // margem lateral
   const safeTop = Math.round(H * 0.10)   // margem superior
   const safeBot = Math.round(H * 0.10)   // margem inferior
-  const logoW   = Math.min(Math.round(W * 0.22), 200)  // ~22% da largura, max 200px
+  const logoW   = Math.min(Math.round(W * 0.18), 180)  // 18%: assinatura, não protagonista
   const gap     = Math.round(safeH * 0.6)
 
   // Mapeamento layout → canto menos conflitante com o bloco de texto

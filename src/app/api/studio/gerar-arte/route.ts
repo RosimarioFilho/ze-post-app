@@ -11,6 +11,10 @@ import {
   type CreativeDecision, type Layout, type VisualStyle, type TypographyBehavior,
   type EyeFlowPattern, type EmotionalToken, type CameraType,
 } from '@/lib/creative-engine'
+import {
+  prepareLogo, buildLogoCompositeLayers,
+  type SharpLayer,
+} from '@/lib/brand-asset'
 
 // ── Retry (trata 529 overloaded e 500 transientes) ────────────
 // 5 tentativas, backoff exponencial com jitter: ~5s, 10s, 20s, 40s, 80s
@@ -96,7 +100,7 @@ async function sharpComposite(
   W: number, H: number,
   googleFont?: string,
   decision?: CreativeDecision,
-  logoUrl?: string,
+  logoLayers?: SharpLayer[],
 ): Promise<Buffer | null> {
   try {
     const { default: sharp } = await import('sharp')
@@ -112,7 +116,6 @@ async function sharpComposite(
       }
     }
 
-    // Fallback: decisão padrão se não fornecida
     const activeDecision: CreativeDecision = decision ?? {
       layout: 'HERO_RIGHT', style: 'CINEMATIC', effects: [],
       typography: 'STACKED', composition: 'default', asset_strategy: 'PRODUCT_HERO',
@@ -123,54 +126,11 @@ async function sharpComposite(
       decision: activeDecision, copy, palette, W, H, fontFaceStyle, fontFamily: activeFontFamily,
     })
 
-    // Camadas de composição: imagem base → overlay SVG → logo (se existir)
+    // Pilha de composição: imagem base → SVG (texto + gradientes) → logo (pré-processada)
     const layers: Parameters<ReturnType<typeof sharp>['composite']>[0] = [
       { input: Buffer.from(svg), top: 0, left: 0 },
+      ...(logoLayers ?? []),
     ]
-
-    if (logoUrl) {
-      try {
-        const logoRes = await fetch(logoUrl)
-        if (logoRes.ok) {
-          const logoBuf  = Buffer.from(await logoRes.arrayBuffer())
-          const placement = getLogoPlacement(activeDecision.layout, W, H)
-
-          // Redimensiona logo mantendo proporção, preserva transparência PNG
-          const logoResized = await sharp(logoBuf)
-            .resize(placement.targetW, undefined, { fit: 'inside', withoutEnlargement: true })
-            .png()
-            .toBuffer()
-
-          const meta = await sharp(logoResized).metadata()
-          const lw   = meta.width  ?? placement.targetW
-          const lh   = meta.height ?? Math.round(placement.targetW * 0.5)
-          const safeX = Math.max(0, Math.min(placement.x, W - lw))
-          const safeY = Math.max(0, Math.min(placement.y, H - lh))
-
-          // ── LOGO ENHANCEMENT: backdrop pill para integração visual ──
-          // Garante contraste da logo sobre qualquer fundo (claro ou escuro)
-          const bdPad = Math.round(Math.max(lw, lh) * 0.14)
-          const bdW   = lw + bdPad * 2
-          const bdH   = lh + bdPad * 2
-          const bdR   = Math.round(bdH * 0.28)   // pill shape
-          const bdX   = Math.max(0, safeX - bdPad)
-          const bdY   = Math.max(0, safeY - bdPad)
-
-          // Backdrop SVG: pill semi-transparente escuro
-          const backdropSvg = `<svg width="${bdW}" height="${bdH}" xmlns="http://www.w3.org/2000/svg">
-  <rect width="${bdW}" height="${bdH}" rx="${bdR}" ry="${bdR}" fill="rgba(0,0,0,0.52)"/>
-</svg>`
-          const backdropBuf = await sharp(Buffer.from(backdropSvg)).png().toBuffer()
-
-          // Ordem: backdrop → logo (integração visual, não "adesivo colado")
-          layers.push({ input: backdropBuf, top: bdY, left: bdX, blend: 'over' })
-          layers.push({ input: logoResized, top: safeY, left: safeX, blend: 'over' })
-          console.log(`[studio] logo + backdrop: ${placement.corner} (${safeX},${safeY}) ${lw}×${lh}px`)
-        }
-      } catch (logoErr) {
-        console.warn('[studio] logo composite skip:', logoErr)
-      }
-    }
 
     return await sharp(imageBuffer)
       .resize(W, H, { fit: 'cover', position: 'centre' })
@@ -814,11 +774,34 @@ passed = score >= 65` },
     // ── Passo 10: Composição de texto sobre a imagem (sharp) ─────
     let finalPngUrl = currentImageUrl // fallback: imagem sem texto
 
+    // ── Passo 9.5: Brand Asset Intelligence — prepara logo ───────
+    let logoLayers: SharpLayer[] | undefined
+    if (companyLogoUrl) {
+      try {
+        const removeBgKey = process.env.REMOVE_BG_API_KEY
+        const prepared = await prepareLogo(
+          companyLogoUrl,
+          supabase,
+          companyId,
+          correctedDecision.style,
+          correctedDecision.emotional_density,
+          removeBgKey,
+        )
+        if (prepared) {
+          const placement = getLogoPlacement(correctedDecision.layout, W, H)
+          logoLayers = await buildLogoCompositeLayers(prepared, placement, W, H)
+          console.log(`[studio] logo pronta: mode=${prepared.mode} bg=${prepared.analysis.bgType}`)
+        }
+      } catch (logoErr) {
+        console.warn('[studio] brand-asset skip (logo sem processamento):', logoErr)
+      }
+    }
+
     if (currentImageBase64) {
       try {
         const detectedFont = (visionAnalysis.typography as { google_font?: string })?.google_font ?? undefined
         const compositeBuffer = await sharpComposite(
-          currentImageBase64, copyOutput, palette, W, H, detectedFont, correctedDecision, companyLogoUrl ?? undefined
+          currentImageBase64, copyOutput, palette, W, H, detectedFont, correctedDecision, logoLayers
         )
         if (compositeBuffer) {
           const compositeUrl = await uploadCompositePng(compositeBuffer, supabase, companyId, jobId)
