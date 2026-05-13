@@ -1,7 +1,6 @@
-// ── Creative Engine v2 — Motor de Composição Visual Perceptivo ──────
-// Sistema de direção de arte modular e inteligente para o Zé Post.
-// Cada camada (layout, style, typography, effects, depth, subject)
-// tem tokens concretos que guiam tanto o render SVG quanto o prompt de imagem.
+// ── Creative Engine v3 — Eye Flow + Emotional Density + Cinematic Framing ──
+// Motor de composição visual perceptivo para o Zé Post.
+// Pensa como agência premium: direção de arte, percepção humana e conversão.
 
 // ════════════════════════════════════════════════════════════════════
 // TIPOS BASE
@@ -26,6 +25,40 @@ export type Effect = 'EMBERS' | 'DUST' | 'LIGHT_LEAK' | 'GLOW' | 'GRAIN' | 'SMOK
 export type TypographyBehavior =
   | 'BOLD_IMPACT' | 'ELEGANT' | 'CONDENSED' | 'STACKED' | 'FLOATING'
 
+// ── Eye Flow Engine ───────────────────────────────────────────────
+export type EyeFlowPattern =
+  | 'Z_PATTERN'         // leitura ocidental: top-left → top-right → diagonal → bottom-right
+  | 'F_PATTERN'         // leitura limpa: dois scans horizontais da esquerda
+  | 'DIAGONAL_LEFT'     // energia diagonal upper-right → lower-left
+  | 'DIAGONAL_RIGHT'    // energia diagonal upper-left → lower-right
+  | 'CENTER_EXPLOSION'  // elemento central irradia para fora
+  | 'HERO_TO_CTA'       // sujeito → headline → CTA (fluxo publicitário clássico)
+  | 'FACE_TO_HEADLINE'  // olhar do personagem conduz ao headline
+
+// ── Emotional Density Engine ──────────────────────────────────────
+export type EmotionalToken =
+  | 'AGGRESSIVE'   // contraste máximo, glow intenso, tensão visual
+  | 'ENERGETIC'    // diagonais, movimento, partículas, dinâmico
+  | 'PREMIUM'      // respiro, suavidade, refinamento
+  | 'CLEAN'        // espaço negativo forte, mínimo ruído
+  | 'CORPORATE'    // profissional, sóbrio, confiança
+  | 'URBAN'        // grain pesado, autêntico, street
+  | 'CINEMATIC'    // atmosfera fílmica, profundidade, drama
+  | 'DRAMATIC'     // intensidade teatral, vignette máximo
+  | 'MINIMAL'      // ultra clean, sem efeitos
+  | 'SOFT'         // gentil, acolhedor, leveza
+
+// ── Cinematic Framing Engine ──────────────────────────────────────
+export type CameraType =
+  | 'HERO_CLOSEUP'        // 85mm, sujeito próximo, fundo bokeh
+  | 'LOW_ANGLE'           // ângulo baixo dramático, poder e dominância
+  | 'WIDE_CINEMATIC'      // anamórfico wide, escala épica
+  | 'DEPTH_COMPRESSION'   // 200mm telephoto, perspectiva comprimida
+  | 'CENTER_HERO'         // 50mm centrado, direto e confiante
+  | 'DYNAMIC_PERSPECTIVE' // ultra-wide distortion, energia extrema
+  | 'PRODUCT_SPOTLIGHT'   // macro/100mm produto, detalhe seletivo
+  | 'MAGAZINE_SHOT'       // editorial 85-120mm, sofisticado
+
 export interface CreativeDecision {
   layout: Layout
   style: VisualStyle
@@ -36,6 +69,10 @@ export interface CreativeDecision {
   mood: string
   depth: 'LOW' | 'MEDIUM' | 'HIGH'
   image_direction: string
+  // v3: Eye Flow + Emotional Density + Cinematic Framing
+  eye_flow?: EyeFlowPattern
+  emotional_density?: EmotionalToken
+  camera_type?: CameraType
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -373,6 +410,223 @@ export const NICHE_DEFAULTS: Record<string, Partial<CreativeDecision>> = {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// EYE FLOW ENGINE — Padrões perceptivos de leitura visual
+// ════════════════════════════════════════════════════════════════════
+
+export interface EyeFlowProps {
+  imageFlowHint: string    // instrução de composição para o prompt de imagem
+  svgFlowHint: string      // dica de fluxo para SVG (metadata)
+  accentAngle: number      // ângulo da linha de acento decorativo (graus)
+  readPoints: string[]     // pontos de leitura sequenciais (para DEBUG)
+}
+
+export const EYE_FLOW_PROPS: Record<EyeFlowPattern, EyeFlowProps> = {
+  Z_PATTERN: {
+    imageFlowHint: 'Composition guides the eye from top-left to top-right, then diagonally to bottom-left, ending at bottom-right CTA. Classic advertising Z-scan flow.',
+    svgFlowHint: 'Top horizontal sweep → diagonal → bottom horizontal',
+    accentAngle: -14,
+    readPoints: ['top-left', 'top-right', 'center-diagonal', 'bottom-right'],
+  },
+  F_PATTERN: {
+    imageFlowHint: 'Two horizontal reading sweeps from left edge. Subject on right, text hierarchy stacked left. Suits informational content and service brands.',
+    svgFlowHint: 'Left-anchored dual horizontal scans',
+    accentAngle: 0,
+    readPoints: ['top-left', 'top-right', 'mid-left', 'mid-center'],
+  },
+  DIAGONAL_LEFT: {
+    imageFlowHint: 'Energy flows from upper-right to lower-left. Subject top-right, CTA bottom-left. Creates falling dynamic tension.',
+    svgFlowHint: 'Upper-right to lower-left diagonal energy',
+    accentAngle: 35,
+    readPoints: ['top-right', 'center', 'bottom-left'],
+  },
+  DIAGONAL_RIGHT: {
+    imageFlowHint: 'Rising energy from lower-left to upper-right. Ascending composition, aspirational. Subject upper-right, text block lower-left.',
+    svgFlowHint: 'Lower-left to upper-right ascending energy',
+    accentAngle: -35,
+    readPoints: ['bottom-left', 'center', 'top-right'],
+  },
+  CENTER_EXPLOSION: {
+    imageFlowHint: 'Central focal point radiates outward to all edges. Subject dead center, energy expanding. Symmetrical explosive composition.',
+    svgFlowHint: 'Central burst expanding to frame edges',
+    accentAngle: 0,
+    readPoints: ['center', 'top', 'right', 'bottom', 'left'],
+  },
+  HERO_TO_CTA: {
+    imageFlowHint: 'Classic ad flow: hero subject catches eye, leads to headline, resolves at CTA. Subject upper area, CTA lower-center. Clear conversion path.',
+    svgFlowHint: 'Subject → headline → CTA vertical cascade',
+    accentAngle: 0,
+    readPoints: ['subject', 'headline', 'subline', 'cta'],
+  },
+  FACE_TO_HEADLINE: {
+    imageFlowHint: 'Person\'s gaze or body direction leads viewer\'s eye toward headline text. Face or eyes pointing toward text area. Human attention hijacking.',
+    svgFlowHint: 'Face/gaze direction → headline',
+    accentAngle: -7,
+    readPoints: ['face', 'gaze-direction', 'headline', 'cta'],
+  },
+}
+
+// ════════════════════════════════════════════════════════════════════
+// EMOTIONAL DENSITY ENGINE — Multiplicadores de intensidade visual
+// ════════════════════════════════════════════════════════════════════
+
+export interface EmotionalDensityProps {
+  glowMultiplier: number
+  grainMultiplier: number
+  vignetteMultiplier: number
+  gradientAlphaMultiplier: number
+  overlayAlphaMultiplier: number
+  spacingMultiplier: number         // afeta GAP e espaçamento tipográfico
+  atmosphericHazeOverride: boolean | null  // null = não sobrescreve
+  imagePromptEmotionSuffix: string
+}
+
+export const EMOTIONAL_DENSITY_TOKENS: Record<EmotionalToken, EmotionalDensityProps> = {
+  AGGRESSIVE: {
+    glowMultiplier: 1.8, grainMultiplier: 1.6, vignetteMultiplier: 1.4,
+    gradientAlphaMultiplier: 1.15, overlayAlphaMultiplier: 1.5,
+    spacingMultiplier: 0.85, atmosphericHazeOverride: null,
+    imagePromptEmotionSuffix: 'aggressive maximum contrast, tension, raw power, dark and intense atmosphere, hard shadows',
+  },
+  ENERGETIC: {
+    glowMultiplier: 1.4, grainMultiplier: 1.3, vignetteMultiplier: 1.2,
+    gradientAlphaMultiplier: 1.05, overlayAlphaMultiplier: 1.2,
+    spacingMultiplier: 0.90, atmosphericHazeOverride: null,
+    imagePromptEmotionSuffix: 'dynamic energy, movement, excitement, vibrant colors, motion blur, high energy composition',
+  },
+  PREMIUM: {
+    glowMultiplier: 0.5, grainMultiplier: 0.0, vignetteMultiplier: 0.7,
+    gradientAlphaMultiplier: 0.88, overlayAlphaMultiplier: 0.6,
+    spacingMultiplier: 1.20, atmosphericHazeOverride: false,
+    imagePromptEmotionSuffix: 'premium refined quality, soft light, elegant restraint, luxury visual language, breathing space',
+  },
+  CLEAN: {
+    glowMultiplier: 0.0, grainMultiplier: 0.0, vignetteMultiplier: 0.4,
+    gradientAlphaMultiplier: 0.80, overlayAlphaMultiplier: 0.3,
+    spacingMultiplier: 1.30, atmosphericHazeOverride: false,
+    imagePromptEmotionSuffix: 'ultra clean, minimal noise, open bright composition, crisp edges, pure negative space',
+  },
+  CORPORATE: {
+    glowMultiplier: 0.2, grainMultiplier: 0.0, vignetteMultiplier: 0.5,
+    gradientAlphaMultiplier: 0.90, overlayAlphaMultiplier: 0.8,
+    spacingMultiplier: 1.10, atmosphericHazeOverride: false,
+    imagePromptEmotionSuffix: 'professional trustworthy, polished corporate aesthetic, credibility, even balanced lighting',
+  },
+  URBAN: {
+    glowMultiplier: 0.8, grainMultiplier: 2.0, vignetteMultiplier: 1.1,
+    gradientAlphaMultiplier: 1.05, overlayAlphaMultiplier: 1.3,
+    spacingMultiplier: 0.95, atmosphericHazeOverride: null,
+    imagePromptEmotionSuffix: 'urban gritty authentic, heavy grain film, street texture, raw documentary energy, city atmosphere',
+  },
+  CINEMATIC: {
+    glowMultiplier: 1.0, grainMultiplier: 0.8, vignetteMultiplier: 1.3,
+    gradientAlphaMultiplier: 1.10, overlayAlphaMultiplier: 1.0,
+    spacingMultiplier: 1.05, atmosphericHazeOverride: true,
+    imagePromptEmotionSuffix: 'cinematic atmospheric depth, film-like color grading, dramatic narrative composition, movie still',
+  },
+  DRAMATIC: {
+    glowMultiplier: 1.5, grainMultiplier: 1.2, vignetteMultiplier: 1.8,
+    gradientAlphaMultiplier: 1.20, overlayAlphaMultiplier: 1.6,
+    spacingMultiplier: 0.90, atmosphericHazeOverride: true,
+    imagePromptEmotionSuffix: 'theatrical dramatic intensity, extreme vignette, deep blacks, spotlight effect, moody and dark',
+  },
+  MINIMAL: {
+    glowMultiplier: 0.0, grainMultiplier: 0.0, vignetteMultiplier: 0.2,
+    gradientAlphaMultiplier: 0.70, overlayAlphaMultiplier: 0.2,
+    spacingMultiplier: 1.40, atmosphericHazeOverride: false,
+    imagePromptEmotionSuffix: 'ultra minimal, maximum negative space, single focus point, serene and deliberate, less is more',
+  },
+  SOFT: {
+    glowMultiplier: 0.6, grainMultiplier: 0.0, vignetteMultiplier: 0.6,
+    gradientAlphaMultiplier: 0.85, overlayAlphaMultiplier: 0.5,
+    spacingMultiplier: 1.15, atmosphericHazeOverride: null,
+    imagePromptEmotionSuffix: 'soft gentle warmth, delicate light, welcoming and approachable, pastel harmony, kind atmosphere',
+  },
+}
+
+// ════════════════════════════════════════════════════════════════════
+// CINEMATIC FRAMING ENGINE — Perfis de câmera e enquadramento
+// ════════════════════════════════════════════════════════════════════
+
+export interface CameraProfile {
+  lensDescription: string
+  angle: string
+  depthOfField: string
+  promptAddition: string
+}
+
+export const CAMERA_PROFILES: Record<CameraType, CameraProfile> = {
+  HERO_CLOSEUP: {
+    lensDescription: '85mm portrait lens',
+    angle: 'eye level, intimate distance',
+    depthOfField: 'shallow — subject sharp, background creamy bokeh',
+    promptAddition: 'shot on 85mm portrait lens, subject fills 60% of frame, beautiful bokeh background separation, intimate hero close-up',
+  },
+  LOW_ANGLE: {
+    lensDescription: '24-35mm wide, tilted upward',
+    angle: 'low angle looking up, dominance and power',
+    depthOfField: 'medium — subject sharp, sky or ceiling in background',
+    promptAddition: 'dramatic low angle hero shot looking up, 24mm wide lens, subject towering and powerful, sky or ceiling visible',
+  },
+  WIDE_CINEMATIC: {
+    lensDescription: 'Anamorphic 2.39:1 widescreen',
+    angle: 'eye level or slightly elevated, wide establishing',
+    depthOfField: 'deep — scene context visible, epic scale',
+    promptAddition: 'anamorphic widescreen shot, epic wide establishing composition, cinematic letterbox feel, grand scale environment',
+  },
+  DEPTH_COMPRESSION: {
+    lensDescription: '200mm telephoto',
+    angle: 'eye level, compressed perspective from distance',
+    depthOfField: 'very shallow — strong background compression, subject isolated',
+    promptAddition: 'shot on 200mm telephoto lens, extreme background compression, layers of elements stacked, subject isolated against soft background',
+  },
+  CENTER_HERO: {
+    lensDescription: '50mm standard lens',
+    angle: 'eye level, centered, confident',
+    depthOfField: 'medium — natural perspective, honest',
+    promptAddition: 'shot on 50mm standard lens, centered symmetrical composition, direct and confident, natural human perspective, honest framing',
+  },
+  DYNAMIC_PERSPECTIVE: {
+    lensDescription: '14-16mm ultra-wide, slight distortion',
+    angle: 'dynamic tilted or extreme low/high angle',
+    depthOfField: 'deep — full scene in focus, distortion energy',
+    promptAddition: 'shot on 14mm ultra-wide lens, extreme dynamic perspective, architectural distortion, radical angle, maximum energy and tension',
+  },
+  PRODUCT_SPOTLIGHT: {
+    lensDescription: '100mm macro or product lens',
+    angle: 'slightly elevated 45°, product centered',
+    depthOfField: 'very shallow — extreme product detail, tack sharp',
+    promptAddition: 'shot on 100mm macro lens, product as absolute hero, extreme detail and texture, selective focus, premium product photography',
+  },
+  MAGAZINE_SHOT: {
+    lensDescription: '85-120mm editorial',
+    angle: 'editorial pose, slightly elevated or eye level',
+    depthOfField: 'shallow to medium — editorial polish',
+    promptAddition: 'editorial magazine-quality shot, 85-120mm lens, sophisticated composition, fashion photography polish, aspirational lifestyle context',
+  },
+}
+
+// ════════════════════════════════════════════════════════════════════
+// NICHE CREATIVE DEFAULTS v3 — eye_flow + emotional + camera por nicho
+// ════════════════════════════════════════════════════════════════════
+
+export const NICHE_CREATIVE_DEFAULTS_V3: Record<string, {
+  eye_flow: EyeFlowPattern
+  emotional_density: EmotionalToken
+  camera_type: CameraType
+}> = {
+  academia:       { eye_flow: 'HERO_TO_CTA',      emotional_density: 'AGGRESSIVE', camera_type: 'LOW_ANGLE'           },
+  luxo:           { eye_flow: 'CENTER_EXPLOSION',  emotional_density: 'PREMIUM',    camera_type: 'MAGAZINE_SHOT'       },
+  tech:           { eye_flow: 'F_PATTERN',         emotional_density: 'CLEAN',      camera_type: 'PRODUCT_SPOTLIGHT'   },
+  alimentacao:    { eye_flow: 'CENTER_EXPLOSION',  emotional_density: 'SOFT',       camera_type: 'PRODUCT_SPOTLIGHT'   },
+  infantil:       { eye_flow: 'CENTER_EXPLOSION',  emotional_density: 'SOFT',       camera_type: 'CENTER_HERO'         },
+  politica:       { eye_flow: 'FACE_TO_HEADLINE',  emotional_density: 'CORPORATE',  camera_type: 'CENTER_HERO'         },
+  moda:           { eye_flow: 'DIAGONAL_RIGHT',    emotional_density: 'DRAMATIC',   camera_type: 'MAGAZINE_SHOT'       },
+  offroad:        { eye_flow: 'DIAGONAL_RIGHT',    emotional_density: 'AGGRESSIVE', camera_type: 'LOW_ANGLE'           },
+  concessionaria: { eye_flow: 'HERO_TO_CTA',       emotional_density: 'CINEMATIC',  camera_type: 'LOW_ANGLE'           },
+  servicos:       { eye_flow: 'Z_PATTERN',         emotional_density: 'CORPORATE',  camera_type: 'CENTER_HERO'         },
+}
+
+// ════════════════════════════════════════════════════════════════════
 // VISUAL COHERENCE SCORER — Validação e auto-correção da decisão
 // ════════════════════════════════════════════════════════════════════
 
@@ -458,6 +712,77 @@ export function applyDecisionCorrections(decision: CreativeDecision): CreativeDe
 }
 
 // ════════════════════════════════════════════════════════════════════
+// v3 HELPERS — Eye Flow, Emotional Density, Cinematic Framing
+// ════════════════════════════════════════════════════════════════════
+
+export function applyEmotionalDensity(tokens: StyleTokens, emotion: EmotionalToken): StyleTokens {
+  const em = EMOTIONAL_DENSITY_TOKENS[emotion]
+  if (!em) return tokens
+
+  return {
+    ...tokens,
+    glowIntensity:   Math.min(1.0, tokens.glowIntensity   * em.glowMultiplier),
+    grainIntensity:  Math.min(1.0, tokens.grainIntensity  * em.grainMultiplier),
+    vignetteIntensity: Math.min(1.0, tokens.vignetteIntensity * em.vignetteMultiplier),
+    gradientAlpha:   Math.min(0.98, tokens.gradientAlpha  * em.gradientAlphaMultiplier),
+    overlayAlpha:    Math.min(0.50, tokens.overlayAlpha   * em.overlayAlphaMultiplier),
+    atmosphericHaze: em.atmosphericHazeOverride !== null ? em.atmosphericHazeOverride : tokens.atmosphericHaze,
+  }
+}
+
+export function buildEyeFlowImageHint(pattern: EyeFlowPattern): string {
+  return EYE_FLOW_PROPS[pattern]?.imageFlowHint ?? ''
+}
+
+export function buildCameraPrompt(cameraType: CameraType): string {
+  const p = CAMERA_PROFILES[cameraType]
+  if (!p) return ''
+  return `${p.promptAddition}. ${p.lensDescription}, ${p.angle}, ${p.depthOfField}`
+}
+
+export function scorePerceptualQuality(decision: CreativeDecision): {
+  score: number
+  notes: string[]
+} {
+  const notes: string[] = []
+  let score = 100
+
+  const { eye_flow, emotional_density, camera_type, style, layout } = decision
+
+  // Eye flow × layout coherence
+  if (eye_flow === 'Z_PATTERN' && ['POSTER', 'CENTER_STACK'].includes(layout)) {
+    score -= 10; notes.push('Z_PATTERN não é ideal para layouts centrados — prefira F_PATTERN ou CENTER_EXPLOSION')
+  }
+  if (eye_flow === 'FACE_TO_HEADLINE' && decision.asset_strategy === 'PRODUCT_HERO') {
+    score -= 15; notes.push('FACE_TO_HEADLINE requer pessoa — asset_strategy PRODUCT_HERO é incompatível')
+  }
+  if (eye_flow === 'DIAGONAL_LEFT' && layout === 'HERO_RIGHT') {
+    score -= 8; notes.push('DIAGONAL_LEFT conflita com HERO_RIGHT (energias opostas)')
+  }
+
+  // Emotional density × style coherence
+  if (emotional_density === 'AGGRESSIVE' && style === 'LUXURY') {
+    score -= 20; notes.push('AGGRESSIVE+LUXURY: densidade emocional incompatível com estilo refinado')
+  }
+  if (emotional_density === 'MINIMAL' && ['SPORT', 'NEON'].includes(style)) {
+    score -= 15; notes.push('MINIMAL+SPORT/NEON: densidade emocional muito baixa para estilos intensos')
+  }
+  if (emotional_density === 'SOFT' && style === 'STREET') {
+    score -= 12; notes.push('SOFT+STREET: energia emocional conflitante com estética urbana')
+  }
+
+  // Camera × layout coherence
+  if (camera_type === 'WIDE_CINEMATIC' && layout === 'FOCUS_CENTER') {
+    score -= 8; notes.push('WIDE_CINEMATIC não é ideal para FOCUS_CENTER — prefira CENTER_HERO ou HERO_CLOSEUP')
+  }
+  if (camera_type === 'PRODUCT_SPOTLIGHT' && decision.asset_strategy === 'PERSON_FOCUSED') {
+    score -= 10; notes.push('PRODUCT_SPOTLIGHT com PERSON_FOCUSED: use HERO_CLOSEUP ou MAGAZINE_SHOT para pessoas')
+  }
+
+  return { score: Math.max(0, score), notes }
+}
+
+// ════════════════════════════════════════════════════════════════════
 // IMAGE PROMPT ENHANCEMENT — Direção fotográfica rica
 // ════════════════════════════════════════════════════════════════════
 
@@ -495,6 +820,22 @@ export function buildImagePromptEnhancement(
   // Contribution 4: Depth tokens
   if (tokens.atmosphericHaze) parts.push('atmospheric depth haze, background separation from foreground')
   if (tokens.vignette) parts.push('natural cinematic vignette on edges')
+
+  // v3: Eye Flow hint
+  if (decision.eye_flow) {
+    parts.push(buildEyeFlowImageHint(decision.eye_flow))
+  }
+
+  // v3: Emotional Density suffix
+  if (decision.emotional_density) {
+    const em = EMOTIONAL_DENSITY_TOKENS[decision.emotional_density]
+    if (em?.imagePromptEmotionSuffix) parts.push(em.imagePromptEmotionSuffix)
+  }
+
+  // v3: Cinematic Framing (overrides generic camera direction)
+  if (decision.camera_type) {
+    parts.push(buildCameraPrompt(decision.camera_type))
+  }
 
   return parts.filter(Boolean).join('. ')
 }
@@ -877,7 +1218,11 @@ export function buildCompositeSVG(opts: {
 }): string {
   const { decision, copy, palette, W, H, fontFaceStyle, fontFamily } = opts
   const { layout, style, effects, typography } = decision
-  const tokens = STYLE_TOKENS[style] ?? STYLE_TOKENS.CINEMATIC
+  const rawTokens = STYLE_TOKENS[style] ?? STYLE_TOKENS.CINEMATIC
+  // v3: Apply emotional density multipliers on top of style tokens
+  const tokens = decision.emotional_density
+    ? applyEmotionalDensity(rawTokens, decision.emotional_density)
+    : rawTokens
 
   // Safe area — Instagram/TikTok: 7% lados, 10% topo/base
   const safeH   = Math.round(W * 0.07)
