@@ -742,44 +742,122 @@ export function buildCameraPrompt(cameraType: CameraType): string {
 
 export function scorePerceptualQuality(decision: CreativeDecision): {
   score: number
+  ceiling: number    // teto máximo por violações críticas
   notes: string[]
+  blockers: string[] // violações que impõem teto no score
 } {
-  const notes: string[] = []
-  let score = 100
+  const notes: string[]    = []
+  const blockers: string[] = []
+  let score   = 100
+  let ceiling = 100
 
   const { eye_flow, emotional_density, camera_type, style, layout } = decision
 
-  // Eye flow × layout coherence
+  // ── v3 completeness (campos obrigatórios) ────────────────────
+  if (!eye_flow)          { score -= 8;  notes.push('eye_flow ausente — padrão HERO_TO_CTA será usado') }
+  if (!emotional_density) { score -= 8;  notes.push('emotional_density ausente — padrão ENERGETIC') }
+  if (!camera_type)       { score -= 8;  notes.push('camera_type ausente — padrão CENTER_HERO') }
+
+  // ── SCORING V2: Tetos por violações críticas de render ───────
+  // Estas regras refletem erros que chegam ao pixel final:
+
+  // Overflow de texto / headline em risco
+  if (decision.typography === 'BOLD_IMPACT' && layout === 'SPLIT_SCREEN') {
+    ceiling = Math.min(ceiling, 55)
+    blockers.push('BOLD_IMPACT+SPLIT_SCREEN: área de texto estreita causa overflow — máx score 55')
+  }
+  if (decision.typography === 'BOLD_IMPACT' && ['POSTER'].includes(layout) && style === 'SPORT') {
+    // SPORT+POSTER+BOLD_IMPACT: headline muito grande para espaço, risco de clipping
+    ceiling = Math.min(ceiling, 65)
+    blockers.push('SPORT+POSTER+BOLD_IMPACT: headline oversized para o container — máx score 65')
+  }
+
+  // CTA clipping risk: CTA muito longo em área restrita
+  if (layout === 'SPLIT_SCREEN' && copy_estimatedCtaLong(decision)) {
+    ceiling = Math.min(ceiling, 45)
+    blockers.push('CTA potencialmente longo em SPLIT_SCREEN (área ~42% do canvas) — máx score 45')
+  }
+
+  // Colisão visual: muitos efeitos = poluição visual
+  if (decision.effects.length > 2) {
+    ceiling = Math.min(ceiling, 50)
+    blockers.push('Mais de 2 efeitos — colisão visual garantida — máx score 50')
+  }
+
+  // Elementos esmagados: CONDENSED + muitos efeitos = ilegibilidade
+  if (decision.typography === 'CONDENSED' && decision.effects.length > 1) {
+    ceiling = Math.min(ceiling, 40)
+    blockers.push('CONDENSED + múltiplos efeitos — hierarquia esmagada — máx score 40')
+  }
+
+  // Logo sem contraste (inferido): logo em área de highlight
+  if (layout === 'FOCUS_CENTER' && decision.depth === 'LOW') {
+    ceiling = Math.min(ceiling, 60)
+    blockers.push('FOCUS_CENTER + LOW depth: logo no canto inferior pode ficar sem contraste — máx score 60')
+  }
+
+  // ── Eye flow × layout coherence ──────────────────────────────
   if (eye_flow === 'Z_PATTERN' && ['POSTER', 'CENTER_STACK'].includes(layout)) {
-    score -= 10; notes.push('Z_PATTERN não é ideal para layouts centrados — prefira F_PATTERN ou CENTER_EXPLOSION')
+    score -= 10; notes.push('Z_PATTERN não ideal para layouts centrados — prefira CENTER_EXPLOSION')
   }
   if (eye_flow === 'FACE_TO_HEADLINE' && decision.asset_strategy === 'PRODUCT_HERO') {
-    score -= 15; notes.push('FACE_TO_HEADLINE requer pessoa — asset_strategy PRODUCT_HERO é incompatível')
+    score -= 15; notes.push('FACE_TO_HEADLINE requer pessoa — incompatível com PRODUCT_HERO')
   }
   if (eye_flow === 'DIAGONAL_LEFT' && layout === 'HERO_RIGHT') {
-    score -= 8; notes.push('DIAGONAL_LEFT conflita com HERO_RIGHT (energias opostas)')
+    score -= 8;  notes.push('DIAGONAL_LEFT conflita com HERO_RIGHT — energias opostas')
+  }
+  if (eye_flow === 'CENTER_EXPLOSION' && ['HERO_RIGHT', 'HERO_LEFT'].includes(layout)) {
+    score -= 8;  notes.push('CENTER_EXPLOSION perde impacto em layouts de herói assimétricos')
   }
 
-  // Emotional density × style coherence
+  // ── Emotional density × style coherence ──────────────────────
   if (emotional_density === 'AGGRESSIVE' && style === 'LUXURY') {
-    score -= 20; notes.push('AGGRESSIVE+LUXURY: densidade emocional incompatível com estilo refinado')
+    score -= 20; notes.push('AGGRESSIVE+LUXURY: incompatível — rebaixa para CINEMATIC ou DRAMATIC')
   }
   if (emotional_density === 'MINIMAL' && ['SPORT', 'NEON'].includes(style)) {
-    score -= 15; notes.push('MINIMAL+SPORT/NEON: densidade emocional muito baixa para estilos intensos')
+    score -= 15; notes.push('MINIMAL+SPORT/NEON: densidade emocional insuficiente para estilos intensos')
   }
-  if (emotional_density === 'SOFT' && style === 'STREET') {
-    score -= 12; notes.push('SOFT+STREET: energia emocional conflitante com estética urbana')
+  if (emotional_density === 'SOFT' && ['STREET', 'SPORT'].includes(style)) {
+    score -= 12; notes.push('SOFT+STREET/SPORT: energia emocional conflitante com estética dura')
+  }
+  if (emotional_density === 'AGGRESSIVE' && style === 'MINIMAL') {
+    score -= 15; notes.push('AGGRESSIVE+MINIMAL: densidade emocional máxima vs estilo ultra-clean')
+  }
+  if (emotional_density === 'DRAMATIC' && style === 'CORPORATE') {
+    score -= 10; notes.push('DRAMATIC+CORPORATE: teatralidade excessiva para comunicação corporativa')
   }
 
-  // Camera × layout coherence
+  // ── Camera × asset strategy coherence ────────────────────────
   if (camera_type === 'WIDE_CINEMATIC' && layout === 'FOCUS_CENTER') {
-    score -= 8; notes.push('WIDE_CINEMATIC não é ideal para FOCUS_CENTER — prefira CENTER_HERO ou HERO_CLOSEUP')
+    score -= 8;  notes.push('WIDE_CINEMATIC não ideal para FOCUS_CENTER — prefira CENTER_HERO')
   }
   if (camera_type === 'PRODUCT_SPOTLIGHT' && decision.asset_strategy === 'PERSON_FOCUSED') {
-    score -= 10; notes.push('PRODUCT_SPOTLIGHT com PERSON_FOCUSED: use HERO_CLOSEUP ou MAGAZINE_SHOT para pessoas')
+    score -= 10; notes.push('PRODUCT_SPOTLIGHT com PERSON_FOCUSED — use HERO_CLOSEUP ou MAGAZINE_SHOT')
+  }
+  if (camera_type === 'LOW_ANGLE' && style === 'MINIMAL') {
+    score -= 6;  notes.push('LOW_ANGLE dramático conflita com estética MINIMAL limpa')
   }
 
-  return { score: Math.max(0, score), notes }
+  // ── Structural style×layout risks ────────────────────────────
+  if (style === 'LUXURY' && layout === 'DIAGONAL_FLOW') {
+    score -= 12; notes.push('LUXURY+DIAGONAL_FLOW: movimento dinâmico não combina com refinamento')
+  }
+  if (style === 'NEON' && layout === 'SPLIT_SCREEN') {
+    score -= 8;  notes.push('NEON+SPLIT_SCREEN: painel sólido conflita com estética neon')
+  }
+  if (style === 'LUXURY' && decision.effects.some(e => ['GLOW', 'SMOKE', 'EMBERS'].includes(e))) {
+    score -= 12; notes.push('LUXURY com efeitos intensos — preservar refinamento sem efeitos')
+  }
+
+  // Score final = min(score baseado em penalidades, teto por violações críticas)
+  return { score: Math.min(Math.max(0, score), ceiling), ceiling, notes, blockers }
+}
+
+// Helper interno: estima se CTA pode ser longo dado o contexto
+function copy_estimatedCtaLong(d: CreativeDecision): boolean {
+  // Não temos o texto real aqui — usa heurística: SPLIT_SCREEN já é restrito
+  // Penalty aplicada no scorer de layout; texto real é validado no render
+  return d.layout === 'SPLIT_SCREEN' && d.typography === 'BOLD_IMPACT'
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1075,13 +1153,13 @@ export function buildTextBlock(opts: TextBlockOptions): string {
 
   const base = Math.min(W, H)
   const isVertical = H / W >= 1.4
-  const isSquare = Math.abs(H / W - 1) < 0.15
+  const isSquare   = Math.abs(H / W - 1) < 0.15
 
+  // ── Base sizes ────────────────────────────────────────────────
   const baseHeadlinePx = Math.round(base / (isVertical ? 14 : isSquare ? 14 : 16))
-  const headlinePx = Math.round(baseHeadlinePx * tp.headlineScale)
-  const sublinePx  = Math.round(baseHeadlinePx * tp.sublineScale)
-  const ctaPx      = Math.round(baseHeadlinePx * 0.36)
-  const GAP        = Math.round(safeH * 0.40)
+  const baseHPx        = Math.round(baseHeadlinePx * tp.headlineScale)
+  const sublinePx      = Math.round(baseHeadlinePx * tp.sublineScale)
+  const baseCtaPx      = Math.round(baseHeadlinePx * 0.36)
 
   const accent   = palette.accent ?? palette.cta_bg ?? '#fe7902'
   const ctaColor = palette.cta_text ?? '#ffffff'
@@ -1099,22 +1177,69 @@ export function buildTextBlock(opts: TextBlockOptions): string {
                    : isSplit    ? Math.round(W * 0.44)
                    : safeH
 
-  const headlineText = applyCase(copy.headline, tokens.headlineCase)
-  const headlineLines = wrapText(headlineText, maxTextW, headlinePx, isCentered ? 0.55 : 0.58, layout === 'POSTER' ? 2 : 3)
-  const sublineLines  = wrapText(copy.subline,  maxTextW, sublinePx, 0.58, tp.maxSublineLines)
+  // ── ADAPTIVE HEADLINE SYSTEM ──────────────────────────────────
+  // charWidth conservador: 0.62 para evitar overflow
+  // UPPER CASE letras: mais largas; usa 0.63 para uppercase
+  const headlineText    = applyCase(copy.headline, tokens.headlineCase)
+  const CW_HEADLINE     = tokens.headlineCase === 'upper' ? 0.63 : 0.60
+  const targetMaxLines  = layout === 'POSTER' ? 2 : 3
+  const minHeadlinePx   = Math.round(baseHPx * 0.62)  // piso: 62% do original
 
+  let headlinePx = baseHPx
+  // Reduz iterativamente até a headline caber em targetMaxLines
+  for (let attempt = 0; attempt < 7; attempt++) {
+    const testLines = wrapText(headlineText, maxTextW, headlinePx, CW_HEADLINE, 0)
+    if (testLines.length <= targetMaxLines) break
+    headlinePx = Math.max(minHeadlinePx, Math.round(headlinePx * 0.88))
+    if (headlinePx <= minHeadlinePx) break
+  }
+
+  const headlineLines = wrapText(headlineText, maxTextW, headlinePx, CW_HEADLINE, targetMaxLines)
+  const sublineLines  = wrapText(copy.subline,  maxTextW, sublinePx,  0.60, tp.maxSublineLines)
+
+  // ── MICRO-SPACING ENGINE ──────────────────────────────────────
+  // Respiro óptico baseado nas fontes, não em safeH fixo
   const headLineH   = Math.round(headlinePx * tp.lineHeightScale * 1.05)
   const subLineH    = Math.round(sublinePx  * tp.lineHeightScale * 1.30)
-  const ctaPadV     = Math.round(ctaPx * 0.65)
-  const ctaPadH     = Math.round(ctaPx * 1.5)
-  const ctaBoxH     = Math.round(ctaPx + ctaPadV * 2)
-  const ctaBorderR  = Math.round(ctaPx * 0.4)
+  const GAP_H2S     = Math.round(headlinePx * 0.45)   // respiro headline → subline
+  const GAP_S2C     = Math.round(sublinePx  * 0.90)   // respiro subline → CTA
+  const GAP_H2C     = Math.round(headlinePx * 0.55)   // respiro headline → CTA (sem subline)
 
-  const textBlockH =
-    headlineLines.length * headLineH + GAP
-    + (sublineLines.length > 0 ? sublineLines.length * subLineH + Math.round(GAP * 1.5) : 0)
+  // ── SMART CTA ENGINE ─────────────────────────────────────────
+  // UPPER CASE chars são ~30% mais largos que minúsculas (0.68 vs 0.52)
+  const ctaStr     = copy.cta.toUpperCase()
+  const CW_CTA     = 0.68
+  const ctaMaxW    = isCentered
+    ? Math.min(maxTextW, Math.round(W * 0.58))
+    : Math.min(maxTextW, Math.round(W * 0.72))
+  const minCtaPx   = Math.round(baseCtaPx * 0.72)
+
+  let ctaPx = baseCtaPx
+  // Reduz ctaPx iterativamente até o botão caber em ctaMaxW
+  for (let i = 0; i < 6; i++) {
+    const textEst = Math.round(ctaStr.length * ctaPx * CW_CTA)
+    const padH    = Math.round(ctaPx * 1.6)
+    if (textEst + padH * 2 <= ctaMaxW) break
+    ctaPx = Math.max(minCtaPx, Math.round(ctaPx * 0.88))
+    if (ctaPx <= minCtaPx) break
+  }
+
+  const ctaTextEst = Math.round(ctaStr.length * ctaPx * CW_CTA)
+  const ctaPadV    = Math.round(ctaPx * 0.65)
+  const ctaPadH    = Math.round(ctaPx * 1.6)
+  const ctaBoxW    = Math.min(ctaTextEst + ctaPadH * 2, ctaMaxW)
+  const ctaBoxH    = Math.round(ctaPx + ctaPadV * 2)
+  const ctaBorderR = Math.round(ctaPx * 0.4)
+
+  // ── COLLISION-SAFE text block height ─────────────────────────
+  const hasSubline  = sublineLines.length > 0
+  const textBlockH  =
+    headlineLines.length * headLineH
+    + GAP_H2S
+    + (hasSubline ? sublineLines.length * subLineH + GAP_S2C : GAP_H2C)
     + ctaBoxH
 
+  // ── Y start (posição vertical do bloco) ──────────────────────
   let startY: number
   if (isFocusTop) {
     startY = safeTop + Math.round(H * 0.02)
@@ -1122,28 +1247,28 @@ export function buildTextBlock(opts: TextBlockOptions): string {
     startY = Math.round(H * 0.56)
   } else {
     startY = H - safeBot - textBlockH
-    const minY = safeTop + Math.round(H * 0.22)
+    const minY = safeTop + Math.round(H * 0.20)
     if (startY < minY) startY = minY
   }
 
   const parts: string[] = []
 
-  // FLOATING: fundo semi-transparente (Hierarquia: fundo < texto)
+  // FLOATING: fundo semi-transparente
   if (tp.floatBg) {
     const bgPad = Math.round(safeH * 0.5)
     const bgX = textX - (isCentered ? Math.round(maxTextW / 2) + bgPad : bgPad)
     parts.push(
       `<rect x="${bgX}" y="${startY - bgPad}" width="${maxTextW + bgPad * 2}" height="${textBlockH + bgPad * 2}" ` +
-      `rx="10" ry="10" fill="rgba(0,0,0,0.58)"/>`
+      `rx="12" ry="12" fill="rgba(0,0,0,0.60)"/>`
     )
   }
 
   let y = startY
 
-  // ── Visual Hierarchy: PRIMARY (headline) ────────────────────────
-  const glowAttr   = glowEnabled ? ` filter="url(#glow)"` : ''
+  // ── PRIMARY: Headline ─────────────────────────────────────────
+  const glowAttr    = glowEnabled ? ` filter="url(#glow)"` : ''
   const shadowStyle = tokens.textShadow
-    ? ` style="filter:drop-shadow(2px 3px 5px rgba(0,0,0,0.9))"`
+    ? ` style="filter:drop-shadow(2px 4px 6px rgba(0,0,0,0.95))"`
     : ''
 
   for (const line of headlineLines) {
@@ -1155,9 +1280,9 @@ export function buildTextBlock(opts: TextBlockOptions): string {
     )
     y += headLineH
   }
-  y += GAP
+  y += GAP_H2S
 
-  // ── Visual Hierarchy: SECONDARY (subline) ───────────────────────
+  // ── SECONDARY: Subline ────────────────────────────────────────
   for (const line of sublineLines) {
     parts.push(
       `<text x="${textX}" y="${y + Math.round(sublinePx * 0.82)}"` +
@@ -1166,33 +1291,29 @@ export function buildTextBlock(opts: TextBlockOptions): string {
     )
     y += subLineH
   }
-  if (sublineLines.length > 0) y += Math.round(GAP * 1.5)
+  y += hasSubline ? GAP_S2C : GAP_H2C
 
-  // ── Visual Hierarchy: TERTIARY (CTA) ────────────────────────────
-  const ctaTextW  = Math.round(copy.cta.length * ctaPx * 0.52)
-  const ctaBoxW   = ctaTextW + ctaPadH * 2
-  const ctaRectX  = isCentered ? Math.round(W / 2) - Math.round(ctaBoxW / 2)
-                  : isRight    ? W - safeH - ctaBoxW
-                  : safeH
-  const ctaY      = isFocusTop ? H - safeBot - ctaBoxH : y
+  // ── TERTIARY: CTA ─────────────────────────────────────────────
+  const ctaRectX = isCentered ? Math.round(W / 2) - Math.round(ctaBoxW / 2)
+                 : isRight    ? W - safeH - ctaBoxW
+                 : safeH
+  const ctaY     = isFocusTop ? H - safeBot - ctaBoxH : y
 
   if (tokens.ctaStyle === 'outline') {
-    // CTA estilo outline (LUXURY, EDITORIAL)
     parts.push(
       `<rect x="${ctaRectX}" y="${ctaY}" width="${ctaBoxW}" height="${ctaBoxH}"` +
       ` rx="${ctaBorderR}" ry="${ctaBorderR}" fill="transparent" stroke="${accent}" stroke-width="2"/>`,
       `<text x="${ctaRectX + Math.round(ctaBoxW / 2)}" y="${ctaY + Math.round(ctaBoxH * 0.67)}"` +
       ` font-family="${fontFamily}" font-size="${ctaPx}" font-weight="600"` +
-      ` fill="${accent}" text-anchor="middle" letter-spacing="2">${esc(copy.cta.toUpperCase())}</text>`
+      ` fill="${accent}" text-anchor="middle" letter-spacing="2">${esc(ctaStr)}</text>`
     )
   } else {
-    // CTA estilo filled (padrão)
     parts.push(
       `<rect x="${ctaRectX}" y="${ctaY}" width="${ctaBoxW}" height="${ctaBoxH}"` +
       ` rx="${ctaBorderR}" ry="${ctaBorderR}" fill="${accent}"/>`,
       `<text x="${ctaRectX + Math.round(ctaBoxW / 2)}" y="${ctaY + Math.round(ctaBoxH * 0.67)}"` +
       ` font-family="${fontFamily}" font-size="${ctaPx}" font-weight="700"` +
-      ` fill="${ctaColor}" text-anchor="middle" letter-spacing="1">${esc(copy.cta.toUpperCase())}</text>`
+      ` fill="${ctaColor}" text-anchor="middle" letter-spacing="1">${esc(ctaStr)}</text>`
     )
   }
 

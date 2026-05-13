@@ -6,7 +6,7 @@ import { generateImage, uploadGeneratedImage, NoProviderError } from '@/lib/imag
 import type { CreativeBrief } from '@/types'
 import {
   buildCompositeSVG, layoutImageHint, NICHE_DEFAULTS,
-  buildImagePromptEnhancement, applyDecisionCorrections,
+  buildImagePromptEnhancement, applyDecisionCorrections, scorePerceptualQuality,
   NICHE_CREATIVE_DEFAULTS_V3, getLogoPlacement,
   type CreativeDecision, type Layout, type VisualStyle, type TypographyBehavior,
   type EyeFlowPattern, type EmotionalToken, type CameraType,
@@ -132,24 +132,40 @@ async function sharpComposite(
       try {
         const logoRes = await fetch(logoUrl)
         if (logoRes.ok) {
-          const logoBuf = Buffer.from(await logoRes.arrayBuffer())
+          const logoBuf  = Buffer.from(await logoRes.arrayBuffer())
           const placement = getLogoPlacement(activeDecision.layout, W, H)
 
-          // Redimensiona logo mantendo proporção, sem fundo (PNG transparente)
+          // Redimensiona logo mantendo proporção, preserva transparência PNG
           const logoResized = await sharp(logoBuf)
             .resize(placement.targetW, undefined, { fit: 'inside', withoutEnlargement: true })
             .png()
             .toBuffer()
 
-          // Garante que x e y não saem do canvas
           const meta = await sharp(logoResized).metadata()
-          const lw = meta.width ?? placement.targetW
-          const lh = meta.height ?? Math.round(placement.targetW * 0.5)
+          const lw   = meta.width  ?? placement.targetW
+          const lh   = meta.height ?? Math.round(placement.targetW * 0.5)
           const safeX = Math.max(0, Math.min(placement.x, W - lw))
           const safeY = Math.max(0, Math.min(placement.y, H - lh))
 
+          // ── LOGO ENHANCEMENT: backdrop pill para integração visual ──
+          // Garante contraste da logo sobre qualquer fundo (claro ou escuro)
+          const bdPad = Math.round(Math.max(lw, lh) * 0.14)
+          const bdW   = lw + bdPad * 2
+          const bdH   = lh + bdPad * 2
+          const bdR   = Math.round(bdH * 0.28)   // pill shape
+          const bdX   = Math.max(0, safeX - bdPad)
+          const bdY   = Math.max(0, safeY - bdPad)
+
+          // Backdrop SVG: pill semi-transparente escuro
+          const backdropSvg = `<svg width="${bdW}" height="${bdH}" xmlns="http://www.w3.org/2000/svg">
+  <rect width="${bdW}" height="${bdH}" rx="${bdR}" ry="${bdR}" fill="rgba(0,0,0,0.52)"/>
+</svg>`
+          const backdropBuf = await sharp(Buffer.from(backdropSvg)).png().toBuffer()
+
+          // Ordem: backdrop → logo (integração visual, não "adesivo colado")
+          layers.push({ input: backdropBuf, top: bdY, left: bdX, blend: 'over' })
           layers.push({ input: logoResized, top: safeY, left: safeX, blend: 'over' })
-          console.log(`[studio] logo composto: ${placement.corner} (${safeX},${safeY}) ${lw}×${lh}px`)
+          console.log(`[studio] logo + backdrop: ${placement.corner} (${safeX},${safeY}) ${lw}×${lh}px`)
         }
       } catch (logoErr) {
         console.warn('[studio] logo composite skip:', logoErr)
@@ -628,6 +644,14 @@ image_direction: instrução em inglês sobre composição e posicionamento do s
     )
     // Auto-corrigir combinações incoerentes (LUXURY+BOLD_IMPACT, SPORT+ELEGANT, etc.)
     const correctedDecision = applyDecisionCorrections(creativeDecision)
+
+    // Visual Scoring V2: loga qualidade perceptiva e blockers críticos
+    const perceptualScore = scorePerceptualQuality(correctedDecision)
+    console.log(`[studio] Visual Score: ${perceptualScore.score}/100 (teto: ${perceptualScore.ceiling})`, {
+      blockers: perceptualScore.blockers,
+      notes: perceptualScore.notes,
+    })
+
     await updateJob(supabase, jobId, { creative_decision: correctedDecision })
 
     // ── Passo 7: Visual Prompt Engineer ──────────────────────
