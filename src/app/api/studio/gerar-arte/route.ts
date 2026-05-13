@@ -6,6 +6,7 @@ import { generateImage, uploadGeneratedImage, NoProviderError } from '@/lib/imag
 import type { CreativeBrief } from '@/types'
 import {
   buildCompositeSVG, layoutImageHint, NICHE_DEFAULTS,
+  buildImagePromptEnhancement, applyDecisionCorrections,
   type CreativeDecision, type Layout, type VisualStyle, type TypographyBehavior,
 } from '@/lib/creative-engine'
 
@@ -554,7 +555,9 @@ Defina com base no NICHO, EMOÇÃO e OBJETIVO. Seja estratégico e criativo — 
         image_direction: '',
       }
     )
-    await updateJob(supabase, jobId, { creative_decision: creativeDecision })
+    // Auto-corrigir combinações incoerentes (LUXURY+BOLD_IMPACT, SPORT+ELEGANT, etc.)
+    const correctedDecision = applyDecisionCorrections(creativeDecision)
+    await updateJob(supabase, jobId, { creative_decision: correctedDecision })
 
     // ── Passo 7: Visual Prompt Engineer ──────────────────────
     await updateJob(supabase, jobId, { status: 'prompt_engineering', current_agent: 'Visual Prompt Engineer', progress_pct: 65 })
@@ -571,10 +574,12 @@ Defina com base no NICHO, EMOÇÃO e OBJETIVO. Seja estratégico e criativo — 
       : ''
 
     const referenceNote = referenceStyle ? `\nVisual reference style to emulate: ${referenceStyle}` : ''
-    const layoutHint = layoutImageHint(creativeDecision.layout)
-    const decisionNote = creativeDecision.image_direction
-      ? `\nCreative direction: ${creativeDecision.image_direction}`
-      : ''
+    const layoutHint = layoutImageHint(correctedDecision.layout)
+    const promptEnhancement = buildImagePromptEnhancement(correctedDecision, niche)
+    const decisionNote = [
+      correctedDecision.image_direction ? `Creative direction: ${correctedDecision.image_direction}` : '',
+      promptEnhancement ? `Photographic guidance: ${promptEnhancement}` : '',
+    ].filter(Boolean).map(s => `\n${s}`).join('')
 
     const promptEngineerRes = await withRetry(() => anthropic.messages.create({
       model: 'claude-sonnet-4-6', max_tokens: 600,
@@ -593,8 +598,8 @@ Lighting: ${creativeBrief.lighting}
 Composition: ${creativeBrief.composition}
 Color mood: ${creativeBrief.color_mood}
 Campaign emotion: ${creativeBrief.campaign_emotion}
-Selected layout: ${creativeDecision.layout} — ${layoutHint}
-Visual mood: ${creativeDecision.mood}
+Selected layout: ${correctedDecision.layout} — ${layoutHint}
+Visual style: ${correctedDecision.style} | Mood: ${correctedDecision.mood}
 Required elements: ${creativeBrief.required_elements.join(', ')}
 Forbidden elements (must NOT appear): ${creativeBrief.forbidden_elements.join(', ')}
 Safety: ${creativeBrief.content_safety === 'safe_for_all' ? 'safe for all ages, no adult content' : 'general adult audience'}
@@ -714,7 +719,7 @@ passed = score >= 65` },
       try {
         const detectedFont = (visionAnalysis.typography as { google_font?: string })?.google_font ?? undefined
         const compositeBuffer = await sharpComposite(
-          currentImageBase64, copyOutput, palette, W, H, detectedFont, creativeDecision
+          currentImageBase64, copyOutput, palette, W, H, detectedFont, correctedDecision
         )
         if (compositeBuffer) {
           const compositeUrl = await uploadCompositePng(compositeBuffer, supabase, companyId, jobId)
