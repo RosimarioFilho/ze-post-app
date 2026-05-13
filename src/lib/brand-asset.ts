@@ -297,20 +297,214 @@ export async function prepareLogo(
 }
 
 // ════════════════════════════════════════════════════════════════════
+// OPTICAL LOGO PLACEMENT — Proeminência, sombra contextual, zona silenciosa
+// ════════════════════════════════════════════════════════════════════
+
+// Percentual máximo de largura do canvas por nicho
+const NICHE_LOGO_PROMINENCE: Record<string, number> = {
+  luxo:        0.13,
+  moda:        0.14,
+  editorial:   0.13,
+  beleza:      0.15,
+  tecnologia:  0.17,
+  imobiliaria: 0.17,
+  servicos:    0.18,
+  alimentacao: 0.18,
+  educacao:    0.18,
+  academia:    0.20,
+  offroad:     0.20,
+  ecommerce:   0.20,
+  infantil:    0.19,
+  eventos:     0.22,
+  politica:    0.24,
+}
+
+// Sombra contextual por estilo + densidade emocional
+function getContextualShadowColor(
+  style: string,
+  emotionalDensity?: string,
+): { r: number; g: number; b: number; alpha: number } {
+  const styleBase: Record<string, { r: number; g: number; b: number }> = {
+    CINEMATIC:  { r: 20, g: 10, b: 5  },
+    TECH:       { r: 0,  g: 8,  b: 20 },
+    LUXURY:     { r: 5,  g: 5,  b: 5  },
+    NEON:       { r: 0,  g: 0,  b: 15 },
+    SPORT:      { r: 15, g: 5,  b: 0  },
+    EDITORIAL:  { r: 5,  g: 5,  b: 8  },
+    CORPORATE:  { r: 0,  g: 5,  b: 12 },
+    MINIMAL:    { r: 0,  g: 0,  b: 0  },
+    STREET:     { r: 8,  g: 5,  b: 0  },
+  }
+  const alphaMap: Record<string, number> = {
+    AGGRESSIVE: 0.70, ENERGETIC: 0.60, PREMIUM: 0.40,
+    CLEAN: 0.35, CORPORATE: 0.45, URBAN: 0.65,
+    CINEMATIC: 0.55, DRAMATIC: 0.70, MINIMAL: 0.30, SOFT: 0.35,
+  }
+  return {
+    ...(styleBase[style] ?? { r: 0, g: 0, b: 0 }),
+    alpha: alphaMap[emotionalDensity ?? ''] ?? 0.55,
+  }
+}
+
+// Padding adaptativo por modo e densidade emocional
+function getAdaptivePadding(mode: LogoMode, emotionalDensity?: string): number {
+  const base: Record<LogoMode, number> = { FLOATING: 24, GLASS: 20, MINIMAL: 28, BADGE: 18 }
+  const mult: Record<string, number> = {
+    PREMIUM: 1.30, MINIMAL: 1.40, SOFT: 1.25,
+    AGGRESSIVE: 0.85, ENERGETIC: 0.90,
+  }
+  return Math.round(base[mode] * (mult[emotionalDensity ?? ''] ?? 1.0))
+}
+
+// Converte corner + dimensões → coordenadas absolutas
+function cornerToXY(
+  corner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right',
+  lw: number, lh: number, W: number, H: number, pad: number,
+): { x: number; y: number } {
+  if (corner === 'top-left')    return { x: pad,           y: pad          }
+  if (corner === 'top-right')   return { x: W - pad - lw,  y: pad          }
+  if (corner === 'bottom-left') return { x: pad,           y: H - pad - lh }
+  return                               { x: W - pad - lw,  y: H - pad - lh }
+}
+
+export interface LogoRenderOptions {
+  imageBuffer?: Buffer
+  palette?: Record<string, string>
+  style?: string
+  emotionalDensity?: string
+  niche?: string
+  layout?: string
+}
+
+// Zonas de texto por layout (coordenadas relativas 0–1)
+type TextZone = { x: number; y: number; w: number; h: number }
+const LAYOUT_TEXT_ZONES: Record<string, TextZone[]> = {
+  HERO_RIGHT:    [{ x: 0,    y: 0.55, w: 0.55, h: 0.45 }],
+  HERO_LEFT:     [{ x: 0.45, y: 0.55, w: 0.55, h: 0.45 }],
+  CENTER_STACK:  [{ x: 0.10, y: 0.35, w: 0.80, h: 0.50 }],
+  POSTER:        [{ x: 0.05, y: 0.20, w: 0.90, h: 0.60 }],
+  FOCUS_CENTER:  [{ x: 0.05, y: 0.05, w: 0.90, h: 0.25 }, { x: 0.05, y: 0.75, w: 0.90, h: 0.20 }],
+  SPLIT_SCREEN:  [{ x: 0,    y: 0.20, w: 0.50, h: 0.60 }],
+  DIAGONAL_FLOW: [{ x: 0.05, y: 0.40, w: 0.90, h: 0.45 }],
+  ASYMMETRIC:    [{ x: 0.45, y: 0.30, w: 0.50, h: 0.55 }],
+}
+
+type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+const ALL_CORNERS: Corner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+
+// Descarta corners que sobreponham zonas de texto do layout
+function filterTextConflicts(
+  candidates: Corner[],
+  layout: string,
+  W: number, H: number,
+  logoW: number, logoH: number,
+  pad: number,
+): Corner[] {
+  const zones = LAYOUT_TEXT_ZONES[layout] ?? []
+  if (!zones.length) return candidates
+
+  return candidates.filter(corner => {
+    const { x, y } = cornerToXY(corner, logoW, logoH, W, H, pad)
+    const lr = { x: x / W, y: y / H, w: logoW / W, h: logoH / H }
+    return !zones.some(z =>
+      lr.x < z.x + z.w && lr.x + lr.w > z.x &&
+      lr.y < z.y + z.h && lr.y + lr.h > z.y,
+    )
+  })
+}
+
+// Analisa variância de pixels para encontrar a zona mais silenciosa
+async function findSilentZone(
+  imageBuffer: Buffer,
+  candidates: Corner[],
+  logoW: number, logoH: number,
+  W: number, H: number,
+  pad: number,
+): Promise<Corner> {
+  if (candidates.length === 1) return candidates[0]
+  try {
+    const { default: sharp } = await import('sharp')
+    const S = 20 // miniatura 20×20 para análise rápida
+
+    const scored: Array<{ corner: Corner; score: number }> = []
+    for (const corner of candidates) {
+      const { x, y } = cornerToXY(corner, logoW, logoH, W, H, pad)
+      const pW = Math.min(Math.max(logoW, 40), W - x)
+      const pH = Math.min(Math.max(logoH, 40), H - y)
+      if (pW <= 0 || pH <= 0) { scored.push({ corner, score: 9999 }); continue }
+
+      try {
+        const { data } = await sharp(imageBuffer)
+          .extract({ left: Math.max(0, x), top: Math.max(0, y), width: pW, height: pH })
+          .resize(S, S, { fit: 'fill' })
+          .grayscale()
+          .raw()
+          .toBuffer({ resolveWithObject: true })
+        const buf = data as Buffer
+        const mean = buf.reduce((s, v) => s + v, 0) / buf.length
+        const variance = buf.reduce((s, v) => s + (v - mean) ** 2, 0) / buf.length
+        // Penaliza zonas muito claras (baixo contraste para logo)
+        const brightPenalty = mean > 200 ? (mean - 200) * 2 : 0
+        scored.push({ corner, score: variance + brightPenalty })
+      } catch {
+        scored.push({ corner, score: 9999 })
+      }
+    }
+    scored.sort((a, b) => a.score - b.score)
+    return scored[0].corner
+  } catch {
+    return candidates[0]
+  }
+}
+
+// Score de coesão entre logo, modo e posição — para diagnóstico
+export function scoreLogoCohesion(
+  analysis: LogoAnalysis,
+  mode: LogoMode,
+  corner: string,
+  layout: string,
+  eyeFlow?: string,
+): { score: number; issues: string[] } {
+  const issues: string[] = []
+  let score = 100
+
+  if (analysis.bgType === 'complex' && mode === 'MINIMAL') {
+    issues.push('Logo complexa em MINIMAL: pode parecer "colada"')
+    score -= 20
+  }
+  if (layout === 'SPLIT_SCREEN' && corner !== 'top-left') {
+    issues.push('SPLIT_SCREEN: logo fora do painel de marca')
+    score -= 10
+  }
+  if (eyeFlow === 'FACE_TO_HEADLINE' && (corner === 'top-left' || corner === 'top-right')) {
+    issues.push('FACE_TO_HEADLINE: logo compete com rosto no topo')
+    score -= 8
+  }
+  if (analysis.bgType === 'transparent' && mode === 'BADGE') {
+    issues.push('Logo transparente em BADGE: FLOATING seria melhor')
+    score -= 5
+  }
+
+  return { score: Math.max(0, score), issues }
+}
+
+// ════════════════════════════════════════════════════════════════════
 // LOGO COMPOSITE LAYERS — Constrói camadas sharp por modo
 // ════════════════════════════════════════════════════════════════════
 
 export async function buildLogoCompositeLayers(
   logo: PreparedLogo,
-  placement: { x: number; y: number; targetW: number },
+  placement: { corner?: Corner; x: number; y: number; targetW: number },
   W: number,
   H: number,
+  options?: LogoRenderOptions,
 ): Promise<SharpLayer[]> {
   const { default: sharp } = await import('sharp')
   const { buffer, mode } = logo
 
-  // Logo Scale Intelligence: máx 18% da largura do canvas
-  const maxW    = Math.min(placement.targetW, Math.round(W * 0.18), 180)
+  // Logo Scale Intelligence: proeminência por nicho + teto absoluto 180px
+  const nichePct = NICHE_LOGO_PROMINENCE[options?.niche ?? ''] ?? 0.18
+  const maxW = Math.min(placement.targetW, Math.round(W * nichePct), 180)
   const resized = await sharp(buffer)
     .resize(maxW, undefined, { fit: 'inside', withoutEnlargement: true })
     .ensureAlpha()
@@ -321,29 +515,52 @@ export async function buildLogoCompositeLayers(
   const lw = meta.width  ?? maxW
   const lh = meta.height ?? Math.round(maxW * 0.5)
 
-  // Clamp ao canvas
-  const sx = Math.max(0, Math.min(placement.x, W - lw - 4))
-  const sy = Math.max(0, Math.min(placement.y, H - lh - 4))
+  // Padding adaptativo por modo e densidade emocional
+  const pad = getAdaptivePadding(mode, options?.emotionalDensity)
+
+  // ── Optical Placement: silent zone + filtro de conflito de texto ─
+  let chosenCorner: Corner = placement.corner ?? 'top-right'
+  if (options?.imageBuffer && options?.layout) {
+    const candidates = filterTextConflicts(
+      ALL_CORNERS, options.layout, W, H, lw, lh, pad,
+    )
+    const safe = candidates.length > 0 ? candidates : ALL_CORNERS
+    // Prefere o corner original se ele não conflita; senão busca zona silenciosa
+    if (safe.includes(chosenCorner)) {
+      const bestByVariance = await findSilentZone(options.imageBuffer, [chosenCorner, ...safe.filter(c => c !== chosenCorner)], lw, lh, W, H, pad)
+      // Só troca se o ganho de silêncio for significativo (já analisou todos os safe)
+      chosenCorner = bestByVariance
+    } else {
+      chosenCorner = await findSilentZone(options.imageBuffer, safe, lw, lh, W, H, pad)
+    }
+  }
+
+  const { x: sx, y: sy } = cornerToXY(chosenCorner, lw, lh, W, H, pad)
+  const clampedSx = Math.max(0, Math.min(sx, W - lw - 4))
+  const clampedSy = Math.max(0, Math.min(sy, H - lh - 4))
 
   const result: SharpLayer[] = []
 
   switch (mode) {
-    // ── FLOATING: shadow natural, logo integrada organicamente ───
+    // ── FLOATING: sombra contextual por estilo + densidade ───────
     case 'FLOATING': {
+      const shadow = getContextualShadowColor(options?.style ?? '', options?.emotionalDensity)
       const { data: ld, info: li } = await sharp(resized)
         .ensureAlpha().raw().toBuffer({ resolveWithObject: true })
       const shadowData = Buffer.allocUnsafe((ld as Buffer).length)
       for (let i = 0; i < (ld as Buffer).length; i += 4) {
-        shadowData[i] = shadowData[i + 1] = shadowData[i + 2] = 0
-        shadowData[i + 3] = Math.round((ld as Buffer)[i + 3] * 0.55)
+        shadowData[i]     = shadow.r
+        shadowData[i + 1] = shadow.g
+        shadowData[i + 2] = shadow.b
+        shadowData[i + 3] = Math.round((ld as Buffer)[i + 3] * shadow.alpha)
       }
       const shadowBuf = await sharp(shadowData, {
         raw: { width: li.width, height: li.height, channels: 4 },
       }).blur(7).png().toBuffer()
 
       const offset = Math.max(2, Math.round(lh * 0.05))
-      result.push({ input: shadowBuf, top: Math.min(H - lh, sy + offset), left: Math.min(W - lw, sx + offset), blend: 'over' })
-      result.push({ input: resized,   top: sy, left: sx, blend: 'over' })
+      result.push({ input: shadowBuf, top: Math.min(H - lh, clampedSy + offset), left: Math.min(W - lw, clampedSx + offset), blend: 'over' })
+      result.push({ input: resized,   top: clampedSy, left: clampedSx, blend: 'over' })
       break
     }
 
@@ -358,10 +575,10 @@ export async function buildLogoCompositeLayers(
         fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.22)" stroke-width="1.5"/>
 </svg>`
       const glassBuf = await sharp(Buffer.from(glassSvg)).png().toBuffer()
-      const bdX = Math.max(0, sx - bdPad)
-      const bdY = Math.max(0, sy - bdPad)
-      result.push({ input: glassBuf, top: bdY, left: bdX, blend: 'over' })
-      result.push({ input: resized,  top: sy,  left: sx,  blend: 'over' })
+      const bdX = Math.max(0, clampedSx - bdPad)
+      const bdY = Math.max(0, clampedSy - bdPad)
+      result.push({ input: glassBuf, top: bdY,        left: bdX,        blend: 'over' })
+      result.push({ input: resized,  top: clampedSy,  left: clampedSx,  blend: 'over' })
       break
     }
 
@@ -376,7 +593,7 @@ export async function buildLogoCompositeLayers(
       const minBuf = await sharp(opacityData, {
         raw: { width: li.width, height: li.height, channels: 4 },
       }).png().toBuffer()
-      result.push({ input: minBuf, top: sy, left: sx, blend: 'over' })
+      result.push({ input: minBuf, top: clampedSy, left: clampedSx, blend: 'over' })
       break
     }
 
@@ -390,10 +607,10 @@ export async function buildLogoCompositeLayers(
   <rect width="${bdW}" height="${bdH}" rx="${bdR}" ry="${bdR}" fill="rgba(0,0,0,0.55)"/>
 </svg>`
       const badgeBuf = await sharp(Buffer.from(badgeSvg)).png().toBuffer()
-      const bdX = Math.max(0, sx - bdPad)
-      const bdY = Math.max(0, sy - bdPad)
-      result.push({ input: badgeBuf, top: bdY, left: bdX, blend: 'over' })
-      result.push({ input: resized,  top: sy,  left: sx,  blend: 'over' })
+      const bdX = Math.max(0, clampedSx - bdPad)
+      const bdY = Math.max(0, clampedSy - bdPad)
+      result.push({ input: badgeBuf, top: bdY,        left: bdX,        blend: 'over' })
+      result.push({ input: resized,  top: clampedSy,  left: clampedSx,  blend: 'over' })
       break
     }
   }

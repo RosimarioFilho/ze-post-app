@@ -1389,26 +1389,48 @@ export interface LogoPlacement {
   corner: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left'
 }
 
-export function getLogoPlacement(layout: Layout, W: number, H: number): LogoPlacement {
-  const safeH   = Math.round(W * 0.07)   // margem lateral
-  const safeTop = Math.round(H * 0.10)   // margem superior
-  const safeBot = Math.round(H * 0.10)   // margem inferior
-  const logoW   = Math.min(Math.round(W * 0.18), 180)  // 18%: assinatura, não protagonista
+// eyeFlow é opcional — posicionamento perceptivo sobrepõe o geométrico quando fornecido
+export function getLogoPlacement(
+  layout: Layout,
+  W: number, H: number,
+  eyeFlow?: EyeFlowPattern,
+): LogoPlacement {
+  const safeH   = Math.round(W * 0.07)
+  const safeTop = Math.round(H * 0.10)
+  const safeBot = Math.round(H * 0.10)
+  const logoW   = Math.min(Math.round(W * 0.18), 180)  // assinatura, não protagonista
   const gap     = Math.round(safeH * 0.6)
 
-  // Mapeamento layout → canto menos conflitante com o bloco de texto
-  const cornerMap: Record<Layout, LogoPlacement['corner']> = {
-    HERO_RIGHT:    'top-right',   // texto bottom-left, logo topo-direita livre
-    HERO_LEFT:     'top-right',   // texto bottom-right, topo-direita ainda ok (logo pequeno)
-    CENTER_STACK:  'top-right',   // texto bottom-center, topo-direita livre
-    POSTER:        'top-right',   // headline centro-baixo, topo-direita livre
-    FOCUS_CENTER:  'bottom-right',// headline no topo — logo vai para canto inferior-direito
-    SPLIT_SCREEN:  'top-left',    // logo no painel de texto (acima da hierarquia)
-    DIAGONAL_FLOW: 'top-right',   // faixa diagonal baixo, topo-direita livre
-    ASYMMETRIC:    'top-right',   // texto bottom-left offset, topo-direita livre
+  // ── Posicionamento por equilíbrio visual ─────────────────────
+  // Princípio: sujeito à direita → logo à esquerda (balanceamento)
+  // Sujeito à esquerda → logo à direita
+  const layoutCorner: Record<Layout, LogoPlacement['corner']> = {
+    HERO_RIGHT:    'top-left',    // sujeito direita → logo equilibra esquerda
+    HERO_LEFT:     'top-right',   // sujeito esquerda → logo equilibra direita
+    CENTER_STACK:  'top-right',   // composição centrada → canônico top-right
+    POSTER:        'top-right',   // headline ocupa baixo → logo top-right
+    FOCUS_CENTER:  'bottom-right',// texto ocupa topo e base → logo bottom-right (quieto)
+    SPLIT_SCREEN:  'top-left',    // âncora de marca no painel de texto (esquerda)
+    DIAGONAL_FLOW: 'top-left',    // energia diagonal sobe-direita → logo contra-ancora esq.
+    ASYMMETRIC:    'top-right',   // tensão offset → top-right canônico
   }
 
-  const corner = cornerMap[layout] ?? 'top-right'
+  let corner = layoutCorner[layout] ?? 'top-right'
+
+  // ── Eye Flow Override: fluxo perceptivo tem prioridade ───────
+  // SPLIT_SCREEN: logo sempre no painel de marca (top-left), eye_flow não interfere
+  if (eyeFlow && layout !== 'SPLIT_SCREEN') {
+    const flowCorner: Partial<Record<EyeFlowPattern, LogoPlacement['corner']>> = {
+      Z_PATTERN:        'top-left',    // logo âncora o início do scan Z
+      F_PATTERN:        'bottom-right',// F lê esquerda → logo periférica baixo-direita
+      DIAGONAL_LEFT:    'top-right',   // energia upper-right→lower-left → logo top-right
+      DIAGONAL_RIGHT:   'bottom-left', // energia lower-left→upper-right → logo bottom-left
+      CENTER_EXPLOSION: 'bottom-right',// explosão central → logo em canto calmo
+      HERO_TO_CTA:      'top-left',    // herói→headline→CTA → logo fora da rota
+      FACE_TO_HEADLINE: 'bottom-right',// face→headline sobem → logo periférica baixo
+    }
+    if (flowCorner[eyeFlow]) corner = flowCorner[eyeFlow]!
+  }
 
   let x: number, y: number
   switch (corner) {
@@ -1422,12 +1444,11 @@ export function getLogoPlacement(layout: Layout, W: number, H: number): LogoPlac
       break
     case 'bottom-right':
       x = W - safeH - logoW - gap
-      // Fica acima da zona de safe bottom, deixando espaço para o CTA
-      y = H - safeBot - Math.round(logoW * 0.5) - Math.round(gap * 3)
+      y = H - safeBot - Math.round(logoW * 0.55) - Math.round(gap * 2.5)
       break
     case 'bottom-left':
       x = safeH + gap
-      y = H - safeBot - Math.round(logoW * 0.5) - Math.round(gap * 3)
+      y = H - safeBot - Math.round(logoW * 0.55) - Math.round(gap * 2.5)
       break
   }
 

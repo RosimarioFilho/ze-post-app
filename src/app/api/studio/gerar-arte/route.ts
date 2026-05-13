@@ -12,7 +12,7 @@ import {
   type EyeFlowPattern, type EmotionalToken, type CameraType,
 } from '@/lib/creative-engine'
 import {
-  prepareLogo, buildLogoCompositeLayers,
+  prepareLogo, buildLogoCompositeLayers, scoreLogoCohesion,
   type SharpLayer,
 } from '@/lib/brand-asset'
 
@@ -631,7 +631,7 @@ image_direction: instrução em inglês sobre composição e posicionamento do s
     const referenceNote = referenceStyle ? `\nVisual reference style to emulate: ${referenceStyle}` : ''
     const layoutHint = layoutImageHint(correctedDecision.layout)
     const promptEnhancement = buildImagePromptEnhancement(correctedDecision, niche)
-    const logoPlacement = companyLogoUrl ? getLogoPlacement(correctedDecision.layout, W, H) : null
+    const logoPlacement = companyLogoUrl ? getLogoPlacement(correctedDecision.layout, W, H, correctedDecision.eye_flow) : null
     const logoNote = logoPlacement
       ? `\nLogo overlay: a company logo will be placed at the ${logoPlacement.corner} corner. Keep that area visually clean and uncluttered — avoid placing key subject elements or bright highlights there.`
       : ''
@@ -788,9 +788,19 @@ passed = score >= 65` },
           removeBgKey,
         )
         if (prepared) {
-          const placement = getLogoPlacement(correctedDecision.layout, W, H)
-          logoLayers = await buildLogoCompositeLayers(prepared, placement, W, H)
-          console.log(`[studio] logo pronta: mode=${prepared.mode} bg=${prepared.analysis.bgType}`)
+          const placement = getLogoPlacement(correctedDecision.layout, W, H, correctedDecision.eye_flow)
+          logoLayers = await buildLogoCompositeLayers(prepared, placement, W, H, {
+            imageBuffer: Buffer.from(currentImageBase64, 'base64'),
+            palette,
+            style: correctedDecision.style,
+            emotionalDensity: correctedDecision.emotional_density,
+            niche,
+            layout: correctedDecision.layout,
+          })
+          const cohesion = scoreLogoCohesion(
+            prepared.analysis, prepared.mode, placement.corner, correctedDecision.layout, correctedDecision.eye_flow,
+          )
+          console.log(`[studio] logo: mode=${prepared.mode} bg=${prepared.analysis.bgType} corner=${placement.corner} cohesion=${cohesion.score}`, cohesion.issues)
         }
       } catch (logoErr) {
         console.warn('[studio] brand-asset skip (logo sem processamento):', logoErr)
