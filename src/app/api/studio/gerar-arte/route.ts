@@ -4,6 +4,10 @@ import { createClient } from '@/lib/supabase/server'
 import { readApiKey, AR_SIZES } from '@/lib/art-utils'
 import { generateImage, uploadGeneratedImage, NoProviderError } from '@/lib/imageProvider'
 import type { CreativeBrief } from '@/types'
+import {
+  buildCompositeSVG, layoutImageHint, NICHE_DEFAULTS,
+  type CreativeDecision, type Layout, type VisualStyle, type TypographyBehavior,
+} from '@/lib/creative-engine'
 
 // ── Retry (trata 529 overloaded e 500 transientes) ────────────
 // 5 tentativas, backoff exponencial com jitter: ~5s, 10s, 20s, 40s, 80s
@@ -66,25 +70,6 @@ async function updateJob(
 
 // ── Sharp Composite (text overlay server-side) ────────────────
 
-function wrapText(text: string, maxWidth: number, fontSize: number, charWidth = 0.55, maxLines = 0): string[] {
-  const charsPerLine = Math.floor(maxWidth / (fontSize * charWidth))
-  const words = text.split(' ')
-  const lines: string[] = []
-  let current = ''
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word
-    if (next.length > charsPerLine && current) {
-      lines.push(current)
-      if (maxLines > 0 && lines.length >= maxLines) return lines
-      current = word
-    } else {
-      current = next
-    }
-  }
-  if (current && (maxLines === 0 || lines.length < maxLines)) lines.push(current)
-  return lines
-}
-
 async function downloadGoogleFont(family: string, weight = '700'): Promise<string | null> {
   try {
     const css = await fetch(
@@ -107,12 +92,12 @@ async function sharpComposite(
   palette: Record<string, string>,
   W: number, H: number,
   googleFont?: string,
+  decision?: CreativeDecision,
 ): Promise<Buffer | null> {
   try {
     const { default: sharp } = await import('sharp')
     const imageBuffer = Buffer.from(imageBase64, 'base64')
 
-    // Baixar fonte do Google Fonts (se solicitada) para embed no SVG
     let fontFaceStyle = ''
     let activeFontFamily = 'Arial Black, Arial, sans-serif'
     if (googleFont) {
@@ -123,104 +108,16 @@ async function sharpComposite(
       }
     }
 
-    const isVertical = H / W >= 1.4
-    const isSquare = Math.abs(H / W - 1) < 0.15
-    const base = Math.min(W, H)
-
-    // Safe area para redes sociais (Instagram feed: 10% topo/base, 7% lados)
-    const SAFE_H   = Math.round(W * 0.07)
-    const SAFE_TOP = Math.round(H * 0.10)
-    const SAFE_BOT = Math.round(H * 0.10)
-    const PAD  = SAFE_H
-    const GAP  = Math.round(PAD * 0.35)
-
-    const headlinePx = Math.round(base / (isVertical ? 14 : isSquare ? 14 : 16))
-    const sublinePx  = Math.round(headlinePx * 0.50)
-    const ctaPx      = Math.round(headlinePx * 0.38)
-    const maxTextW   = W - PAD * 2
-    const accent     = palette.accent ?? palette.cta_bg ?? '#fe7902'
-    const ctaColor   = palette.cta_text ?? '#ffffff'
-
-    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    // charWidth conservador (0.60 headline, 0.58 subline) para evitar overflow
-    const headlineLines = wrapText(copy.headline.toUpperCase(), maxTextW, headlinePx, 0.60)
-    const sublineLines  = wrapText(copy.subline, maxTextW, sublinePx, 0.58, 3)
-
-    const headLineH  = Math.round(headlinePx * 1.05)
-    const subLineH   = Math.round(sublinePx  * 1.35)
-    const ctaPadV    = Math.round(ctaPx * 0.65)
-    const ctaPadH    = Math.round(ctaPx * 1.5)
-    const ctaBoxH    = Math.round(ctaPx + ctaPadV * 2)
-    const ctaBorderR = Math.round(ctaPx * 0.4)
-
-    const textBlockH =
-      headlineLines.length * headLineH
-      + GAP
-      + (sublineLines.length > 0 ? sublineLines.length * subLineH + Math.round(GAP * 1.8) : 0)
-      + ctaBoxH
-
-    // y inicial: respeitando safe area inferior
-    let y = H - SAFE_BOT - textBlockH
-    // se bloco maior que área disponível, comprimir para dentro da safe area
-    const minY = SAFE_TOP + Math.round(H * 0.25)
-    if (y < minY) y = minY
-
-    const gradientPct = Math.max(0, Math.round(((y - PAD) / H) * 100))
-    const gradientAlpha = isVertical ? '0.92' : '0.85'
-
-    const svgParts: string[] = []
-
-    for (const line of headlineLines) {
-      svgParts.push(
-        `<text x="${PAD}" y="${y + Math.round(headlinePx * 0.82)}"` +
-        ` font-family="${activeFontFamily}" font-size="${headlinePx}" font-weight="900"` +
-        ` fill="white" letter-spacing="-1">${esc(line)}</text>`
-      )
-      y += headLineH
+    // Fallback: decisão padrão se não fornecida
+    const activeDecision: CreativeDecision = decision ?? {
+      layout: 'HERO_RIGHT', style: 'CINEMATIC', effects: [],
+      typography: 'STACKED', composition: 'default', asset_strategy: 'PRODUCT_HERO',
+      mood: 'professional', depth: 'MEDIUM', image_direction: '',
     }
-    y += GAP
 
-    for (const line of sublineLines) {
-      svgParts.push(
-        `<text x="${PAD}" y="${y + Math.round(sublinePx * 0.82)}"` +
-        ` font-family="${activeFontFamily}" font-size="${sublinePx}"` +
-        ` fill="rgba(255,255,255,0.9)">${esc(line)}</text>`
-      )
-      y += subLineH
-    }
-    if (sublineLines.length > 0) y += Math.round(GAP * 1.8)
-
-    const ctaBoxW = Math.round(copy.cta.length * ctaPx * 0.52 + ctaPadH * 2)
-    svgParts.push(
-      `<rect x="${PAD}" y="${y}" width="${ctaBoxW}" height="${ctaBoxH}"` +
-      ` rx="${ctaBorderR}" ry="${ctaBorderR}" fill="${accent}"/>`,
-      `<text x="${PAD + Math.round(ctaBoxW / 2)}" y="${y + Math.round(ctaBoxH * 0.67)}"` +
-      ` font-family="${activeFontFamily}" font-size="${ctaPx}" font-weight="700"` +
-      ` fill="${ctaColor}" text-anchor="middle" letter-spacing="1">${esc(copy.cta.toUpperCase())}</text>`
-    )
-
-    // Área segura de conteúdo — clipPath garante que texto nunca ultrapasse as bordas
-    const safeX = PAD
-    const safeY = SAFE_TOP
-    const safeW = W - PAD * 2
-    const safeH = H - SAFE_TOP - SAFE_BOT
-
-    const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-${fontFaceStyle}
-<defs>
-  <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="${gradientPct}%" stop-color="transparent"/>
-    <stop offset="100%" stop-color="rgba(0,0,0,${gradientAlpha})"/>
-  </linearGradient>
-  <clipPath id="safeArea">
-    <rect x="${safeX}" y="${safeY}" width="${safeW}" height="${safeH}"/>
-  </clipPath>
-</defs>
-<rect width="${W}" height="${H}" fill="url(#g)"/>
-<g clip-path="url(#safeArea)">
-${svgParts.join('\n')}
-</g>
-</svg>`
+    const svg = buildCompositeSVG({
+      decision: activeDecision, copy, palette, W, H, fontFaceStyle, fontFamily: activeFontFamily,
+    })
 
     return await sharp(imageBuffer)
       .resize(W, H, { fit: 'cover', position: 'centre' })
@@ -616,6 +513,49 @@ REGRAS OBRIGATÓRIAS:
     )
     await updateJob(supabase, jobId, { creative_brief: creativeBrief })
 
+    // ── Passo 6.5: Creative Decision Engine ──────────────────
+    await updateJob(supabase, jobId, { status: 'creative_decision', current_agent: 'Creative Decision Engine', progress_pct: 58 })
+
+    const nicheDefaults = NICHE_DEFAULTS[niche] ?? NICHE_DEFAULTS['servicos'] ?? {}
+    const decisionRes = await withRetry(() => anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001', max_tokens: 512,
+      system: `Diretor de Arte Digital. Analise o briefing e retorne APENAS JSON puro com a decisão criativa:
+{"layout":"HERO_RIGHT","style":"CINEMATIC","effects":[],"typography":"STACKED","composition":"","asset_strategy":"PRODUCT_HERO","mood":"","depth":"MEDIUM","image_direction":""}
+
+LAYOUTS disponíveis — escolha o mais impactante para o objetivo:
+- HERO_RIGHT: sujeito direita, texto embaixo-esquerda (padrão forte)
+- HERO_LEFT: sujeito esquerda, texto embaixo-direita
+- CENTER_STACK: texto centralizado, composição simétrica e equilibrada
+- POSTER: headline enorme centralizada, visual de máximo impacto
+- FOCUS_CENTER: headline no topo, produto/pessoa centralizado, CTA no rodapé
+- SPLIT_SCREEN: metade colorida com texto, metade imagem (corporativo/clean)
+- DIAGONAL_FLOW: faixa diagonal dinâmica com texto (esporte/ação)
+- ASYMMETRIC: bloco de texto offset, tensão visual criativa
+
+STYLES: CINEMATIC | LUXURY | SPORT | TECH | MINIMAL | NEON | CORPORATE | EDITORIAL | STREET
+EFFECTS (máx 2): GLOW | GRAIN | LIGHT_LEAK | SMOKE (use com critério, não aleatoriamente)
+TYPOGRAPHY: BOLD_IMPACT | ELEGANT | CONDENSED | STACKED | FLOATING
+
+image_direction: instrução em inglês para o gerador de imagem sobre composição e posicionamento do sujeito (30-50 palavras).
+Defina com base no NICHO, EMOÇÃO e OBJETIVO. Seja estratégico e criativo — varie o layout!`,
+      messages: [{ role: 'user', content: `Nicho: ${niche}\nEmoção: ${creativeBrief.campaign_emotion}\nEstilo: ${creativeBrief.visual_style}\nObjetivo: ${strategy.objective ?? briefing}\nTem pessoa: ${String(visionAnalysis.has_person)}\nTem produto: ${!!productImageUrl}\nFormato: ${W}×${H}px\nDefault do nicho: ${JSON.stringify(nicheDefaults)}` }],
+    }))
+    const creativeDecision: CreativeDecision = parseJson<CreativeDecision>(
+      decisionRes.content[0].type === 'text' ? decisionRes.content[0].text : '{}',
+      {
+        layout: (nicheDefaults.layout ?? 'HERO_RIGHT') as Layout,
+        style: (nicheDefaults.style ?? 'CINEMATIC') as VisualStyle,
+        effects: nicheDefaults.effects ?? [],
+        typography: (nicheDefaults.typography ?? 'STACKED') as TypographyBehavior,
+        composition: creativeBrief.composition,
+        asset_strategy: 'PRODUCT_HERO',
+        mood: creativeBrief.campaign_emotion,
+        depth: nicheDefaults.depth ?? 'MEDIUM',
+        image_direction: '',
+      }
+    )
+    await updateJob(supabase, jobId, { creative_decision: creativeDecision })
+
     // ── Passo 7: Visual Prompt Engineer ──────────────────────
     await updateJob(supabase, jobId, { status: 'prompt_engineering', current_agent: 'Visual Prompt Engineer', progress_pct: 65 })
 
@@ -631,6 +571,10 @@ REGRAS OBRIGATÓRIAS:
       : ''
 
     const referenceNote = referenceStyle ? `\nVisual reference style to emulate: ${referenceStyle}` : ''
+    const layoutHint = layoutImageHint(creativeDecision.layout)
+    const decisionNote = creativeDecision.image_direction
+      ? `\nCreative direction: ${creativeDecision.image_direction}`
+      : ''
 
     const promptEngineerRes = await withRetry(() => anthropic.messages.create({
       model: 'claude-sonnet-4-6', max_tokens: 600,
@@ -649,14 +593,16 @@ Lighting: ${creativeBrief.lighting}
 Composition: ${creativeBrief.composition}
 Color mood: ${creativeBrief.color_mood}
 Campaign emotion: ${creativeBrief.campaign_emotion}
+Selected layout: ${creativeDecision.layout} — ${layoutHint}
+Visual mood: ${creativeDecision.mood}
 Required elements: ${creativeBrief.required_elements.join(', ')}
 Forbidden elements (must NOT appear): ${creativeBrief.forbidden_elements.join(', ')}
 Safety: ${creativeBrief.content_safety === 'safe_for_all' ? 'safe for all ages, no adult content' : 'general adult audience'}
-Image dimensions: ${W}×${H}px${referenceNote}
+Image dimensions: ${W}×${H}px${referenceNote}${decisionNote}
 
 RULES:
 - If a specific product name/brand/model was mentioned in the briefing, use it EXACTLY (e.g. "Fiat Toro 2026 pickup truck" not "a pickup truck")
-- Leave clear visual space at the BOTTOM for text overlay (gradient area ~40% height)
+- Respect the layout composition hint above for subject placement
 - Write 80-120 words using photography/cinematography terminology
 - End with: "commercial advertising photography, studio quality, sharp focus, no text, no watermarks"` }],
     }))
@@ -768,7 +714,7 @@ passed = score >= 65` },
       try {
         const detectedFont = (visionAnalysis.typography as { google_font?: string })?.google_font ?? undefined
         const compositeBuffer = await sharpComposite(
-          currentImageBase64, copyOutput, palette, W, H, detectedFont
+          currentImageBase64, copyOutput, palette, W, H, detectedFont, creativeDecision
         )
         if (compositeBuffer) {
           const compositeUrl = await uploadCompositePng(compositeBuffer, supabase, companyId, jobId)
