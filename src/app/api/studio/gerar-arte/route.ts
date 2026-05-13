@@ -84,15 +84,43 @@ function wrapText(text: string, maxWidth: number, fontSize: number, charWidth = 
   return lines
 }
 
+async function downloadGoogleFont(family: string, weight = '700'): Promise<string | null> {
+  try {
+    const css = await fetch(
+      `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:wght@${weight}&display=swap`,
+      { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } }
+    ).then(r => r.ok ? r.text() : null)
+    if (!css) return null
+    const urlMatch = css.match(/url\((https:\/\/fonts\.gstatic\.com[^)]+)\)/i)
+    if (!urlMatch) return null
+    const fontBuf = await fetch(urlMatch[1]).then(r => r.ok ? r.arrayBuffer() : null)
+    if (!fontBuf) return null
+    const mime = urlMatch[1].includes('.woff2') ? 'font/woff2' : urlMatch[1].includes('.woff') ? 'font/woff' : 'font/ttf'
+    return `data:${mime};base64,${Buffer.from(fontBuf).toString('base64')}`
+  } catch { return null }
+}
+
 async function sharpComposite(
   imageBase64: string,
   copy: { headline: string; subline: string; cta: string },
   palette: Record<string, string>,
   W: number, H: number,
+  googleFont?: string,
 ): Promise<Buffer | null> {
   try {
     const { default: sharp } = await import('sharp')
     const imageBuffer = Buffer.from(imageBase64, 'base64')
+
+    // Baixar fonte do Google Fonts (se solicitada) para embed no SVG
+    let fontFaceStyle = ''
+    let activeFontFamily = 'Arial Black, Arial, sans-serif'
+    if (googleFont) {
+      const fontDataUri = await downloadGoogleFont(googleFont, '700')
+      if (fontDataUri) {
+        fontFaceStyle = `<style>@font-face{font-family:'${googleFont}';src:url('${fontDataUri}');font-weight:700;}</style>`
+        activeFontFamily = `'${googleFont}', Arial Black, Arial, sans-serif`
+      }
+    }
 
     const isVertical = H / W >= 1.4
     const isSquare = Math.abs(H / W - 1) < 0.15
@@ -132,7 +160,7 @@ async function sharpComposite(
     for (const line of headlineLines) {
       svgParts.push(
         `<text x="${PAD}" y="${y + Math.round(headlinePx * 0.82)}"` +
-        ` font-family="Arial Black,Arial,sans-serif" font-size="${headlinePx}" font-weight="900"` +
+        ` font-family="${activeFontFamily}" font-size="${headlinePx}" font-weight="900"` +
         ` fill="white" letter-spacing="-1">${esc(line)}</text>`
       )
       y += headLineH
@@ -142,7 +170,7 @@ async function sharpComposite(
     for (const line of sublineLines) {
       svgParts.push(
         `<text x="${PAD}" y="${y + Math.round(sublinePx * 0.82)}"` +
-        ` font-family="Arial,sans-serif" font-size="${sublinePx}"` +
+        ` font-family="${activeFontFamily}" font-size="${sublinePx}"` +
         ` fill="rgba(255,255,255,0.9)">${esc(line)}</text>`
       )
       y += subLineH
@@ -154,11 +182,12 @@ async function sharpComposite(
       `<rect x="${PAD}" y="${y}" width="${ctaBoxW}" height="${ctaBoxH}"` +
       ` rx="${ctaBorderR}" ry="${ctaBorderR}" fill="${accent}"/>`,
       `<text x="${PAD + Math.round(ctaBoxW / 2)}" y="${y + Math.round(ctaBoxH * 0.67)}"` +
-      ` font-family="Arial,sans-serif" font-size="${ctaPx}" font-weight="700"` +
+      ` font-family="${activeFontFamily}" font-size="${ctaPx}" font-weight="700"` +
       ` fill="${ctaColor}" text-anchor="middle" letter-spacing="1">${esc(copy.cta.toUpperCase())}</text>`
     )
 
     const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+${fontFaceStyle}
 <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
   <stop offset="${gradientPct}%" stop-color="transparent"/>
   <stop offset="100%" stop-color="rgba(0,0,0,${gradientAlpha})"/>
@@ -444,7 +473,8 @@ async function runPipeline(ctx: PipelineCtx) {
             const visionRes = await withRetry(() => anthropic.messages.create({
               model: 'claude-sonnet-4-6', max_tokens: 1024,
               system: `Analista Visual de marketing. Retorne APENAS JSON puro:
-{"product_type":"","dominant_colors":[],"secondary_colors":[],"has_face":false,"has_person":false,"object_position":"center","background_type":"clean","best_text_area":"bottom","suggested_visual_style":"premium","product_description":"","observations":""}`,
+{"product_type":"","dominant_colors":[],"secondary_colors":[],"has_face":false,"has_person":false,"object_position":"center","background_type":"clean","best_text_area":"bottom","suggested_visual_style":"premium","product_description":"","observations":"","typography":{"detected":false,"style":"sans-serif","weight":"bold","personality":"modern","google_font":"Montserrat"}}
+Se houver texto visível no produto/embalagem, detecte a tipografia e sugira o Google Font mais próximo. Se não houver texto, sugira um Google Font adequado ao estilo e nicho do produto (ex: luxo→Playfair Display, tech→Space Grotesk, sport→Barlow Condensed, food→Poppins, kids→Nunito).`,
               messages: [{ role: 'user', content: [
                 { type: 'image', source: { type: 'base64', media_type: imgBase64.mediaType, data: imgBase64.data } },
                 { type: 'text', text: `Analise este produto. Nicho: ${niche}.` },
@@ -464,14 +494,23 @@ async function runPipeline(ctx: PipelineCtx) {
           const refBase64 = await fetchImageAsBase64(referenceImageUrl)
           if (refBase64) {
             const refRes = await withRetry(() => anthropic.messages.create({
-              model: 'claude-haiku-4-5-20251001', max_tokens: 400,
-              system: 'Describe in 3 sentences the visual style, composition, lighting and color palette of this reference image. Be concise and in English.',
+              model: 'claude-haiku-4-5-20251001', max_tokens: 512,
+              system: `Analise esta imagem de referência e retorne APENAS JSON puro:
+{"visual_style":"","composition":"","lighting":"","color_palette":"","typography":{"detected":false,"style":"sans-serif","weight":"bold","personality":"modern","google_font":"Montserrat"}}
+Se houver texto visível na imagem, detecte a tipografia e sugira o Google Font mais próximo no campo google_font. Se não houver texto, sugira um Google Font que combine com o estilo visual da imagem.`,
               messages: [{ role: 'user', content: [
                 { type: 'image', source: { type: 'base64', media_type: refBase64.mediaType, data: refBase64.data } },
-                { type: 'text', text: 'Describe the visual style of this reference image.' },
+                { type: 'text', text: 'Analise o estilo visual e tipografia desta imagem de referência.' },
               ]}],
             }))
-            referenceStyle = refRes.content[0].type === 'text' ? refRes.content[0].text : ''
+            const rawRef = refRes.content[0].type === 'text' ? refRes.content[0].text : '{}'
+            const refJson = parseJson<Record<string, unknown>>(rawRef, {})
+            referenceStyle = [refJson.visual_style, refJson.composition, refJson.lighting, refJson.color_palette]
+              .filter(Boolean).join(' ') || rawRef
+            const refTypo = refJson.typography as { google_font?: string } | undefined
+            if (refTypo?.google_font && !visionAnalysis.typography) {
+              (visionAnalysis as Record<string, unknown>).typography = refTypo
+            }
           }
         } catch (err) { console.warn('[studio] Reference style failed:', err) }
       }
@@ -701,8 +740,9 @@ passed = score >= 65` },
 
     if (currentImageBase64) {
       try {
+        const detectedFont = (visionAnalysis.typography as { google_font?: string })?.google_font ?? undefined
         const compositeBuffer = await sharpComposite(
-          currentImageBase64, copyOutput, palette, W, H
+          currentImageBase64, copyOutput, palette, W, H, detectedFont
         )
         if (compositeBuffer) {
           const compositeUrl = await uploadCompositePng(compositeBuffer, supabase, companyId, jobId)
