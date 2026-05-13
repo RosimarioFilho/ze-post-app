@@ -170,3 +170,119 @@ export const STATUS_LABELS: Record<ContentStatus, { label: string; color: string
   publicado: { label: 'Publicado', color: 'bg-emerald-100 text-emerald-700' },
   rejeitado: { label: 'Rejeitado', color: 'bg-red-100 text-red-700' },
 }
+
+// ── Studio IA ────────────────────────────────────────────────
+
+export type CreativeJobStatus =
+  | 'pending'
+  | 'bg_removing'
+  | 'analyzing'
+  | 'palette_extracting'
+  | 'strategizing'
+  | 'copywriting'
+  | 'creative_directing'
+  | 'prompt_engineering'
+  | 'generating_image'
+  | 'visual_review'
+  | 'regenerating'
+  | 'done'
+  | 'failed'
+
+export interface CreativeBrief {
+  niche_key: string
+  archetype: string
+  campaign_emotion: string
+  target_audience: string
+  visual_style: string
+  photography_style: string
+  lighting: string
+  composition: string
+  color_mood: string
+  forbidden_elements: string[]
+  required_elements: string[]
+  content_safety: 'safe_for_all' | 'general_adult'
+}
+
+export interface CreativeJob {
+  id: string
+  company_id: string
+  created_by?: string
+  content_type: string
+  briefing: string
+  product_image_url?: string
+  product_image_nobg_url?: string
+  status: CreativeJobStatus
+  current_agent?: string
+  progress_pct: number
+  vision_analysis?: Record<string, unknown>
+  palette?: Record<string, string>
+  strategy?: Record<string, string>
+  copy_output?: { headline: string; subline: string; cta: string; caption: string }
+  art_direction?: Record<string, unknown>
+  creative_brief?: CreativeBrief
+  image_provider?: string
+  image_prompt?: string
+  generated_image_url?: string
+  visual_score?: number
+  retry_count?: number
+  rejected_reason?: string
+  designer_html?: string
+  rendered_png_url?: string
+  critique?: {
+    score: number
+    passed: boolean
+    issues: Array<{ rule: string; severity: 'high' | 'medium' | 'low'; suggestion: string }>
+    praise?: string[]
+  }
+  correction_attempts?: number
+  final_html?: string
+  final_png_url?: string
+  content_id?: string
+  error_message?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface BrandKit {
+  id: string
+  company_id: string
+  primary_font: string
+  secondary_font: string
+  accent_color?: string
+  tone_of_voice: string
+  preferred_styles: string[]
+  rejected_styles: string[]
+  preferred_ctas: string[]
+  approved_art_examples: string[]
+  rejected_art_examples: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface DesignTemplate {
+  id: string
+  name: string
+  category: string
+  compatible_formats: string[]
+  description: string
+  html_skeleton: string
+  preview_url?: string
+  is_active: boolean
+  created_at: string
+}
+
+export const CREATIVE_JOB_STATUS_LABELS: Record<CreativeJobStatus, { label: string; emoji: string }> = {
+  pending:             { label: 'Aguardando início', emoji: '⏳' },
+  bg_removing:         { label: 'Removendo background...', emoji: '✂️' },
+  analyzing:           { label: 'Analisando imagem...', emoji: '🔍' },
+  palette_extracting:  { label: 'Extraindo paleta de cores...', emoji: '🎨' },
+  strategizing:        { label: 'Criando estratégia...', emoji: '🧠' },
+  copywriting:         { label: 'Escrevendo textos...', emoji: '✍️' },
+  creative_directing:  { label: 'Diretor Criativo definindo brief...', emoji: '🎬' },
+  prompt_engineering:  { label: 'Criando prompt visual...', emoji: '✏️' },
+  generating_image:    { label: 'Gerando imagem com IA...', emoji: '🖼️' },
+  visual_review:       { label: 'Crítico avaliando imagem...', emoji: '🧐' },
+  regenerating:        { label: 'Refinando imagem...', emoji: '🔄' },
+  done:                { label: 'Arte pronta!', emoji: '✅' },
+  failed:              { label: 'Erro no processo', emoji: '❌' },
+}

@@ -8,7 +8,6 @@ export async function POST(req: NextRequest) {
     const { html, width = 1080, height = 1080 } = await req.json()
     if (!html) return NextResponse.json({ error: 'HTML obrigatório' }, { status: 400 })
 
-    // Import dinâmico para não quebrar o build em ambientes sem Chromium
     const puppeteer = (await import('puppeteer')).default
 
     const browser = await puppeteer.launch({
@@ -18,23 +17,20 @@ export async function POST(req: NextRequest) {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
-        '--font-render-hinting=none', // melhor renderização de fontes
+        '--font-render-hinting=none',
       ],
     })
 
     const page = await browser.newPage()
+    await page.setViewport({ width, height, deviceScaleFactor: 1 })
 
-    await page.setViewport({ width, height, deviceScaleFactor: 2 }) // @2x para alta resolução
-
-    // Injeta o HTML e espera fonts + imagens (networkidle0 = nenhuma req de rede por 500ms)
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 })
-
-    // Aguarda Google Fonts renderizarem (necessário mesmo após networkidle0)
-    await new Promise(r => setTimeout(r, 600))
+    // networkidle2: aguarda imagem do Supabase carregar antes de tirar screenshot
+    await page.setContent(html, { waitUntil: 'networkidle2', timeout: 30000 })
+    await new Promise(r => setTimeout(r, 1500))
 
     const screenshot = await page.screenshot({
       type: 'png',
-      clip: { x: 0, y: 0, width, height },
+      fullPage: false,
       omitBackground: false,
     })
 
