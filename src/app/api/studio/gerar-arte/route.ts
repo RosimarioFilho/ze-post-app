@@ -7,7 +7,7 @@ import type { CreativeBrief } from '@/types'
 import {
   buildCompositeSVG, layoutImageHint, NICHE_DEFAULTS,
   buildImagePromptEnhancement, applyDecisionCorrections,
-  NICHE_CREATIVE_DEFAULTS_V3,
+  NICHE_CREATIVE_DEFAULTS_V3, getLogoPlacement,
   type CreativeDecision, type Layout, type VisualStyle, type TypographyBehavior,
   type EyeFlowPattern, type EmotionalToken, type CameraType,
 } from '@/lib/creative-engine'
@@ -96,6 +96,7 @@ async function sharpComposite(
   W: number, H: number,
   googleFont?: string,
   decision?: CreativeDecision,
+  logoUrl?: string,
 ): Promise<Buffer | null> {
   try {
     const { default: sharp } = await import('sharp')
@@ -122,9 +123,42 @@ async function sharpComposite(
       decision: activeDecision, copy, palette, W, H, fontFaceStyle, fontFamily: activeFontFamily,
     })
 
+    // Camadas de composição: imagem base → overlay SVG → logo (se existir)
+    const layers: Parameters<ReturnType<typeof sharp>['composite']>[0] = [
+      { input: Buffer.from(svg), top: 0, left: 0 },
+    ]
+
+    if (logoUrl) {
+      try {
+        const logoRes = await fetch(logoUrl)
+        if (logoRes.ok) {
+          const logoBuf = Buffer.from(await logoRes.arrayBuffer())
+          const placement = getLogoPlacement(activeDecision.layout, W, H)
+
+          // Redimensiona logo mantendo proporção, sem fundo (PNG transparente)
+          const logoResized = await sharp(logoBuf)
+            .resize(placement.targetW, undefined, { fit: 'inside', withoutEnlargement: true })
+            .png()
+            .toBuffer()
+
+          // Garante que x e y não saem do canvas
+          const meta = await sharp(logoResized).metadata()
+          const lw = meta.width ?? placement.targetW
+          const lh = meta.height ?? Math.round(placement.targetW * 0.5)
+          const safeX = Math.max(0, Math.min(placement.x, W - lw))
+          const safeY = Math.max(0, Math.min(placement.y, H - lh))
+
+          layers.push({ input: logoResized, top: safeY, left: safeX, blend: 'over' })
+          console.log(`[studio] logo composto: ${placement.corner} (${safeX},${safeY}) ${lw}×${lh}px`)
+        }
+      } catch (logoErr) {
+        console.warn('[studio] logo composite skip:', logoErr)
+      }
+    }
+
     return await sharp(imageBuffer)
       .resize(W, H, { fit: 'cover', position: 'centre' })
-      .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+      .composite(layers)
       .png()
       .toBuffer()
   } catch (err) {
@@ -371,6 +405,7 @@ async function runPipeline(ctx: PipelineCtx) {
   const pc = company?.primary_color ?? '#052d64'
   const sc = company?.secondary_color ?? '#fe7902'
   const companyName = company?.name ?? 'Sua Empresa'
+  const companyLogoUrl = company?.logo_url ?? null
   const niche = company?.niche ?? 'servicos'
   const toneOfVoice = brandKit?.tone_of_voice ?? 'profissional'
   const preferredCtas = (brandKit?.preferred_ctas ?? ['Saiba mais', 'Aproveite']).join(', ')
@@ -612,6 +647,10 @@ image_direction: instrução em inglês sobre composição e posicionamento do s
     const referenceNote = referenceStyle ? `\nVisual reference style to emulate: ${referenceStyle}` : ''
     const layoutHint = layoutImageHint(correctedDecision.layout)
     const promptEnhancement = buildImagePromptEnhancement(correctedDecision, niche)
+    const logoPlacement = companyLogoUrl ? getLogoPlacement(correctedDecision.layout, W, H) : null
+    const logoNote = logoPlacement
+      ? `\nLogo overlay: a company logo will be placed at the ${logoPlacement.corner} corner. Keep that area visually clean and uncluttered — avoid placing key subject elements or bright highlights there.`
+      : ''
     const decisionNote = [
       correctedDecision.image_direction ? `Creative direction: ${correctedDecision.image_direction}` : '',
       promptEnhancement ? `Photographic guidance: ${promptEnhancement}` : '',
@@ -639,7 +678,7 @@ Visual style: ${correctedDecision.style} | Mood: ${correctedDecision.mood}
 Required elements: ${creativeBrief.required_elements.join(', ')}
 Forbidden elements (must NOT appear): ${creativeBrief.forbidden_elements.join(', ')}
 Safety: ${creativeBrief.content_safety === 'safe_for_all' ? 'safe for all ages, no adult content' : 'general adult audience'}
-Image dimensions: ${W}×${H}px${referenceNote}${decisionNote}
+Image dimensions: ${W}×${H}px${referenceNote}${logoNote}${decisionNote}
 
 RULES:
 - If a specific product name/brand/model was mentioned in the briefing, use it EXACTLY (e.g. "Fiat Toro 2026 pickup truck" not "a pickup truck")
@@ -755,7 +794,7 @@ passed = score >= 65` },
       try {
         const detectedFont = (visionAnalysis.typography as { google_font?: string })?.google_font ?? undefined
         const compositeBuffer = await sharpComposite(
-          currentImageBase64, copyOutput, palette, W, H, detectedFont, correctedDecision
+          currentImageBase64, copyOutput, palette, W, H, detectedFont, correctedDecision, companyLogoUrl ?? undefined
         )
         if (compositeBuffer) {
           const compositeUrl = await uploadCompositePng(compositeBuffer, supabase, companyId, jobId)

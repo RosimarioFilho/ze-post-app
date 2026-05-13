@@ -1256,3 +1256,59 @@ ${textBlock}
 export function layoutImageHint(layout: Layout): string {
   return LAYOUT_RULES[layout]?.cameraInstruction ?? ''
 }
+
+// ════════════════════════════════════════════════════════════════════
+// LOGO PLACEMENT ENGINE — Posicionamento inteligente da logomarca
+// ════════════════════════════════════════════════════════════════════
+
+export interface LogoPlacement {
+  x: number         // pixel left
+  y: number         // pixel top
+  targetW: number   // largura alvo do logo redimensionado
+  corner: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left'
+}
+
+export function getLogoPlacement(layout: Layout, W: number, H: number): LogoPlacement {
+  const safeH   = Math.round(W * 0.07)   // margem lateral
+  const safeTop = Math.round(H * 0.10)   // margem superior
+  const safeBot = Math.round(H * 0.10)   // margem inferior
+  const logoW   = Math.min(Math.round(W * 0.22), 200)  // ~22% da largura, max 200px
+  const gap     = Math.round(safeH * 0.6)
+
+  // Mapeamento layout → canto menos conflitante com o bloco de texto
+  const cornerMap: Record<Layout, LogoPlacement['corner']> = {
+    HERO_RIGHT:    'top-right',   // texto bottom-left, logo topo-direita livre
+    HERO_LEFT:     'top-right',   // texto bottom-right, topo-direita ainda ok (logo pequeno)
+    CENTER_STACK:  'top-right',   // texto bottom-center, topo-direita livre
+    POSTER:        'top-right',   // headline centro-baixo, topo-direita livre
+    FOCUS_CENTER:  'bottom-right',// headline no topo — logo vai para canto inferior-direito
+    SPLIT_SCREEN:  'top-left',    // logo no painel de texto (acima da hierarquia)
+    DIAGONAL_FLOW: 'top-right',   // faixa diagonal baixo, topo-direita livre
+    ASYMMETRIC:    'top-right',   // texto bottom-left offset, topo-direita livre
+  }
+
+  const corner = cornerMap[layout] ?? 'top-right'
+
+  let x: number, y: number
+  switch (corner) {
+    case 'top-right':
+      x = W - safeH - logoW - gap
+      y = safeTop + gap
+      break
+    case 'top-left':
+      x = safeH + gap
+      y = safeTop + gap
+      break
+    case 'bottom-right':
+      x = W - safeH - logoW - gap
+      // Fica acima da zona de safe bottom, deixando espaço para o CTA
+      y = H - safeBot - Math.round(logoW * 0.5) - Math.round(gap * 3)
+      break
+    case 'bottom-left':
+      x = safeH + gap
+      y = H - safeBot - Math.round(logoW * 0.5) - Math.round(gap * 3)
+      break
+  }
+
+  return { x, y, targetW: logoW, corner }
+}
