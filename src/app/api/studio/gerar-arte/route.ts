@@ -7,7 +7,9 @@ import type { CreativeBrief } from '@/types'
 import {
   buildCompositeSVG, layoutImageHint, NICHE_DEFAULTS,
   buildImagePromptEnhancement, applyDecisionCorrections,
+  NICHE_CREATIVE_DEFAULTS_V3,
   type CreativeDecision, type Layout, type VisualStyle, type TypographyBehavior,
+  type EyeFlowPattern, type EmotionalToken, type CameraType,
 } from '@/lib/creative-engine'
 
 // ── Retry (trata 529 overloaded e 500 transientes) ────────────
@@ -518,10 +520,11 @@ REGRAS OBRIGATÓRIAS:
     await updateJob(supabase, jobId, { status: 'creative_decision', current_agent: 'Creative Decision Engine', progress_pct: 58 })
 
     const nicheDefaults = NICHE_DEFAULTS[niche] ?? NICHE_DEFAULTS['servicos'] ?? {}
+    const nicheV3Defaults = NICHE_CREATIVE_DEFAULTS_V3[niche] ?? NICHE_CREATIVE_DEFAULTS_V3['servicos']
     const decisionRes = await withRetry(() => anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001', max_tokens: 512,
+      model: 'claude-haiku-4-5-20251001', max_tokens: 640,
       system: `Diretor de Arte Digital. Analise o briefing e retorne APENAS JSON puro com a decisão criativa:
-{"layout":"HERO_RIGHT","style":"CINEMATIC","effects":[],"typography":"STACKED","composition":"","asset_strategy":"PRODUCT_HERO","mood":"","depth":"MEDIUM","image_direction":""}
+{"layout":"HERO_RIGHT","style":"CINEMATIC","effects":[],"typography":"STACKED","composition":"","asset_strategy":"PRODUCT_HERO","mood":"","depth":"MEDIUM","image_direction":"","eye_flow":"HERO_TO_CTA","emotional_density":"ENERGETIC","camera_type":"CENTER_HERO"}
 
 LAYOUTS disponíveis — escolha o mais impactante para o objetivo:
 - HERO_RIGHT: sujeito direita, texto embaixo-esquerda (padrão forte)
@@ -534,12 +537,42 @@ LAYOUTS disponíveis — escolha o mais impactante para o objetivo:
 - ASYMMETRIC: bloco de texto offset, tensão visual criativa
 
 STYLES: CINEMATIC | LUXURY | SPORT | TECH | MINIMAL | NEON | CORPORATE | EDITORIAL | STREET
-EFFECTS (máx 2): GLOW | GRAIN | LIGHT_LEAK | SMOKE (use com critério, não aleatoriamente)
+EFFECTS (máx 2): GLOW | GRAIN | LIGHT_LEAK | SMOKE (use com critério)
 TYPOGRAPHY: BOLD_IMPACT | ELEGANT | CONDENSED | STACKED | FLOATING
 
-image_direction: instrução em inglês para o gerador de imagem sobre composição e posicionamento do sujeito (30-50 palavras).
-Defina com base no NICHO, EMOÇÃO e OBJETIVO. Seja estratégico e criativo — varie o layout!`,
-      messages: [{ role: 'user', content: `Nicho: ${niche}\nEmoção: ${creativeBrief.campaign_emotion}\nEstilo: ${creativeBrief.visual_style}\nObjetivo: ${strategy.objective ?? briefing}\nTem pessoa: ${String(visionAnalysis.has_person)}\nTem produto: ${!!productImageUrl}\nFormato: ${W}×${H}px\nDefault do nicho: ${JSON.stringify(nicheDefaults)}` }],
+EYE_FLOW — padrão perceptivo de leitura:
+- Z_PATTERN: varredura ocidental clássica top-left→top-right→diagonal→bottom-right
+- F_PATTERN: dois scans horizontais da esquerda (conteúdo/serviço)
+- DIAGONAL_LEFT: energia descendente upper-right→lower-left
+- DIAGONAL_RIGHT: energia ascendente lower-left→upper-right (aspiracional)
+- CENTER_EXPLOSION: elemento central irradia para fora (impacto)
+- HERO_TO_CTA: sujeito→headline→CTA fluxo publicitário clássico
+- FACE_TO_HEADLINE: olhar/gesto do personagem conduz ao título (use só com pessoa)
+
+EMOTIONAL_DENSITY — intensidade visual emocional:
+- AGGRESSIVE: contraste máximo, tensão visual intensa (academia/offroad)
+- ENERGETIC: dinâmico, movimento, vibrante (esporte/promoções)
+- PREMIUM: respiro, suavidade, refinamento (luxo/moda premium)
+- CLEAN: espaço negativo forte, mínimo ruído (tech/minimalismo)
+- CORPORATE: profissional, sóbrio, confiança (serviços/político)
+- URBAN: grain pesado, autêntico, street (moda urbana/cultura)
+- CINEMATIC: atmosfera fílmica, profundidade, drama (cinema/veículos)
+- DRAMATIC: intensidade teatral, vignette máximo (fashion/impacto)
+- MINIMAL: ultra clean, sem efeitos, sereno (alimentação/wellbeing)
+- SOFT: gentil, acolhedor, leveza (infantil/saúde/beleza)
+
+CAMERA_TYPE — enquadramento cinematográfico:
+- HERO_CLOSEUP: 85mm retrato, bokeh, íntimo
+- LOW_ANGLE: ângulo baixo dramático, poder e dominância
+- WIDE_CINEMATIC: anamórfico épico, escala grandiosa
+- DEPTH_COMPRESSION: 200mm telephoto, perspectiva comprimida
+- CENTER_HERO: 50mm centrado, direto e confiante
+- DYNAMIC_PERSPECTIVE: ultra-wide distortion, energia extrema
+- PRODUCT_SPOTLIGHT: macro/100mm, detalhe seletivo do produto
+- MAGAZINE_SHOT: editorial 85-120mm, sofisticado
+
+image_direction: instrução em inglês sobre composição e posicionamento do sujeito (30-50 palavras).`,
+      messages: [{ role: 'user', content: `Nicho: ${niche}\nEmoção: ${creativeBrief.campaign_emotion}\nEstilo: ${creativeBrief.visual_style}\nObjetivo: ${strategy.objective ?? briefing}\nTem pessoa: ${String(visionAnalysis.has_person)}\nTem produto: ${!!productImageUrl}\nFormato: ${W}×${H}px\nDefault do nicho: ${JSON.stringify(nicheDefaults)}\nDefault v3 do nicho: ${JSON.stringify(nicheV3Defaults)}` }],
     }))
     const creativeDecision: CreativeDecision = parseJson<CreativeDecision>(
       decisionRes.content[0].type === 'text' ? decisionRes.content[0].text : '{}',
@@ -553,6 +586,9 @@ Defina com base no NICHO, EMOÇÃO e OBJETIVO. Seja estratégico e criativo — 
         mood: creativeBrief.campaign_emotion,
         depth: nicheDefaults.depth ?? 'MEDIUM',
         image_direction: '',
+        eye_flow: (nicheV3Defaults?.eye_flow ?? 'HERO_TO_CTA') as EyeFlowPattern,
+        emotional_density: (nicheV3Defaults?.emotional_density ?? 'ENERGETIC') as EmotionalToken,
+        camera_type: (nicheV3Defaults?.camera_type ?? 'CENTER_HERO') as CameraType,
       }
     )
     // Auto-corrigir combinações incoerentes (LUXURY+BOLD_IMPACT, SPORT+ELEGANT, etc.)
