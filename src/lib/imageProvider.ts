@@ -158,26 +158,51 @@ async function recraftImageGen(prompt: string, size: string): Promise<ImageResul
 }
 
 // ── Provider: OpenAI gpt-image-1 ─────────────────────────────
-// gpt-image-1 suporta renderização de texto na imagem com precisão
+// Com produto: usa /v1/images/edits (mantém produto na cena)
+// Sem produto: usa /v1/images/generations
 
-async function openaiImageGen(prompt: string, size: '1024x1024' | '1792x1024' | '1024x1792'): Promise<ImageResult> {
+async function openaiImageGen(
+  prompt: string,
+  size: '1024x1024' | '1792x1024' | '1024x1792',
+  productBase64?: string,
+  productMime?: string,
+): Promise<ImageResult> {
   const key = process.env.OPENAI_API_KEY!
-
-  // gpt-image-1 só aceita 1024x1024, 1536x1024 ou 1024x1536
   const gptSize =
     size === '1792x1024' ? '1536x1024'
     : size === '1024x1792' ? '1024x1536'
     : '1024x1024'
 
+  if (productBase64) {
+    // Edits endpoint: usa imagem do produto como base visual
+    const form = new FormData()
+    form.append('model', 'gpt-image-1')
+    form.append('prompt', prompt)
+    form.append('size', gptSize)
+    form.append('n', '1')
+    const mime = (productMime ?? 'image/png') as string
+    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg'
+    const bytes = Buffer.from(productBase64, 'base64')
+    const blob = new Blob([bytes], { type: mime })
+    form.append('image[]', blob, `product.${ext}`)
+
+    const res = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+    })
+    if (!res.ok) throw new Error(`OpenAI edits error ${res.status}: ${await res.text()}`)
+    const data = await res.json()
+    const b64 = data.data?.[0]?.b64_json
+    if (!b64) throw new Error('OpenAI edits: sem imagem na resposta')
+    return { base64: b64, mimeType: 'image/png', provider: 'OpenAI gpt-image-1 (produto)' }
+  }
+
+  // Generations endpoint: sem produto
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'gpt-image-1',
-      prompt,
-      n: 1,
-      size: gptSize,
-    }),
+    body: JSON.stringify({ model: 'gpt-image-1', prompt, n: 1, size: gptSize }),
   })
   if (!res.ok) throw new Error(`OpenAI gpt-image-1 error ${res.status}: ${await res.text()}`)
   const data = await res.json()
@@ -194,6 +219,7 @@ export async function generateImage(
   W: number,
   H: number,
   productBase64?: string,
+  productMime?: string,
 ): Promise<ImageResult> {
   const ar = getAspectRatios(contentType)
 
@@ -201,7 +227,7 @@ export async function generateImage(
   if (process.env.FAL_KEY) return falImageGen(prompt, W, H, productBase64)
   if (process.env.IDEOGRAM_API_KEY) return ideogramImageGen(prompt, ar.ideogram)
   if (process.env.RECRAFT_API_KEY) return recraftImageGen(prompt, ar.recraftSize)
-  if (process.env.OPENAI_API_KEY) return openaiImageGen(prompt, ar.dalleSize)
+  if (process.env.OPENAI_API_KEY) return openaiImageGen(prompt, ar.dalleSize, productBase64, productMime)
 
   throw new NoProviderError()
 }

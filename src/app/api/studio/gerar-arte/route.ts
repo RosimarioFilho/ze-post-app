@@ -608,13 +608,15 @@ RULES:
     // ── Passo 8: Image Generation ─────────────────────────────
     await updateJob(supabase, jobId, { status: 'generating_image', current_agent: 'Image Generation IA', progress_pct: 75 })
 
+    // Baixa produto para todos os provedores (não só Fal.ai)
     let productBase64ForGen: string | undefined
-    if (productImageUrl && process.env.FAL_KEY) {
+    let productMimeForGen: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' | undefined
+    if (productImageUrl) {
       const imgData = await fetchImageAsBase64(productImageUrl)
-      if (imgData) productBase64ForGen = imgData.data
+      if (imgData) { productBase64ForGen = imgData.data; productMimeForGen = imgData.mediaType }
     }
 
-    const imageResult = await generateImage(imagePrompt, contentType, W, H, productBase64ForGen)
+    const imageResult = await generateImage(imagePrompt, contentType, W, H, productBase64ForGen, productMimeForGen)
     const rawImageUrl = await uploadGeneratedImage(imageResult.base64, imageResult.mimeType, supabase, companyId, jobId)
 
     await updateJob(supabase, jobId, { generated_image_url: rawImageUrl, image_provider: imageResult.provider })
