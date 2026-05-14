@@ -24,6 +24,8 @@ interface AspectRatios {
   ideogram: string
   recraftSize: string
   dalleSize: '1024x1024' | '1792x1024' | '1024x1792'
+  falW: number
+  falH: number
 }
 
 function getAspectRatios(contentType: string): AspectRatios {
@@ -31,13 +33,17 @@ function getAspectRatios(contentType: string): AspectRatios {
   const horizontal = ['post_facebook', 'post_linkedin_imagem', 'youtube']
 
   if (vertical.includes(contentType)) {
-    return { gemini: '9:16', ideogram: 'ASPECT_9_16', recraftSize: '1024x1820', dalleSize: '1024x1792' }
+    return { gemini: '9:16', ideogram: 'ASPECT_9_16', recraftSize: '1024x1820', dalleSize: '1024x1792', falW: 1024, falH: 1820 }
   }
   if (horizontal.includes(contentType)) {
-    return { gemini: '16:9', ideogram: 'ASPECT_16_9', recraftSize: '1820x1024', dalleSize: '1792x1024' }
+    return { gemini: '16:9', ideogram: 'ASPECT_16_9', recraftSize: '1820x1024', dalleSize: '1792x1024', falW: 1820, falH: 1024 }
   }
-  // square: post_instagram, carrossel, post_linkedin_texto, default
-  return { gemini: '1:1', ideogram: 'ASPECT_1_1', recraftSize: '1024x1024', dalleSize: '1024x1024' }
+  if (contentType === 'carrossel') {
+    // 4:5 Instagram Carousel — Sharp compositor faz o resize final para 1080×1350
+    return { gemini: '4:5', ideogram: 'ASPECT_4_5', recraftSize: '1024x1280', dalleSize: '1024x1792', falW: 1024, falH: 1280 }
+  }
+  // square: post_instagram, post_linkedin_texto, default
+  return { gemini: '1:1', ideogram: 'ASPECT_1_1', recraftSize: '1024x1024', dalleSize: '1024x1024', falW: 1024, falH: 1024 }
 }
 
 // ── Fetch image URL as base64 ─────────────────────────────────
@@ -224,7 +230,7 @@ export async function generateImage(
   const ar = getAspectRatios(contentType)
 
   if (process.env.GEMINI_IMAGE_API_KEY) return geminiImageGen(prompt, ar.gemini)
-  if (process.env.FAL_KEY) return falImageGen(prompt, W, H, productBase64)
+  if (process.env.FAL_KEY) return falImageGen(prompt, ar.falW, ar.falH, productBase64)
   if (process.env.IDEOGRAM_API_KEY) return ideogramImageGen(prompt, ar.ideogram)
   if (process.env.RECRAFT_API_KEY) return recraftImageGen(prompt, ar.recraftSize)
   if (process.env.OPENAI_API_KEY) return openaiImageGen(prompt, ar.dalleSize, productBase64, productMime)

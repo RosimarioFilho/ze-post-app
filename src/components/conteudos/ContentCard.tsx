@@ -2,10 +2,11 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Pencil, Trash2, Calendar, ImageIcon, Loader2, Download } from 'lucide-react'
+import { Pencil, Trash2, Calendar, ImageIcon, Loader2, Download, ChevronLeft, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { STATUS_LABELS, CONTENT_TYPE_LABELS } from '@/types'
 import { timeAgo } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 
 const PLATFORM_LABELS: Record<string, string> = {
   instagram: 'IG', facebook: 'FB', linkedin: 'LI', youtube: 'YT', tiktok: 'TK',
@@ -22,16 +23,21 @@ const TYPE_COLORS: Record<string, string> = {
   reels: '#000000',
 }
 
+// Dimensões reais de cada formato
 const AR_DIMS: Record<string, [number, number]> = {
-  post_instagram: [1080, 1080],
-  post_facebook: [1080, 566],
+  post_instagram:       [1080, 1080],
+  post_facebook:        [1080, 566],
   post_linkedin_imagem: [1200, 627],
-  post_linkedin_texto: [1080, 1080],
-  stories: [1080, 1920],
-  carrossel: [1080, 1080],
-  youtube: [1280, 720],
-  reels: [1080, 1920],
+  post_linkedin_texto:  [1080, 1080],
+  stories:              [1080, 1920],
+  carrossel:            [1080, 1350],
+  youtube:              [1280, 720],
+  reels:                [1080, 1920],
 }
+
+// Máximo de altura proporcional para o thumbnail do card (evita cards enormes)
+// Expressado como fração da largura do container (padding-bottom %)
+const MAX_THUMB_RATIO = 1.1   // max 110% da largura = approx 4:5 limitado
 
 interface ContentCardProps {
   content: {
@@ -66,11 +72,7 @@ function HtmlArtThumbnail({ html, src, dims }: { html?: string; src?: string; di
   }, [W])
 
   return (
-    <div
-      ref={containerRef}
-      className="relative w-full overflow-hidden"
-      style={{ aspectRatio: `${W}/${H}` }}
-    >
+    <div ref={containerRef} className="relative w-full h-full overflow-hidden">
       <div style={{
         width: W, height: H,
         transform: `scale(${scale})`,
@@ -84,6 +86,99 @@ function HtmlArtThumbnail({ html, src, dims }: { html?: string; src?: string; di
           style={{ width: W, height: H, border: 'none', display: 'block' }}
           title="Arte gerada"
         />
+      </div>
+    </div>
+  )
+}
+
+// Thumbnail com aspect ratio correto mas altura máxima controlada
+function CardThumbnail({
+  content: c, dims, typeColor, artImageUrl, hasArtHtml, artHtmlUrl,
+}: {
+  content: ContentCardProps['content']
+  dims: [number, number]
+  typeColor: string
+  artImageUrl: string | undefined
+  hasArtHtml: boolean
+  artHtmlUrl: string | undefined
+}) {
+  const isCarousel = c.content_type === 'carrossel'
+  const imageUrls = isCarousel
+    ? (c.media_urls?.filter(u => !u.endsWith('.html')) ?? [])
+    : (artImageUrl ? [artImageUrl] : [])
+
+  const [slideIdx, setSlideIdx] = useState(0)
+  const total = imageUrls.length
+
+  const [W, H] = dims
+  // Calcula ratio limitado: se a imagem for mais alta que MAX_THUMB_RATIO × largura, limita
+  const rawRatio = H / W
+  const cappedRatio = Math.min(rawRatio, MAX_THUMB_RATIO)
+  const paddingPct = `${cappedRatio * 100}%`
+
+  const currentUrl = imageUrls[slideIdx]
+
+  return (
+    <div className="relative w-full overflow-hidden" style={{ paddingBottom: paddingPct, backgroundColor: typeColor + '12' }}>
+      <div className="absolute inset-0">
+        {hasArtHtml ? (
+          <HtmlArtThumbnail html={c.art_html!} dims={dims} />
+        ) : artHtmlUrl ? (
+          <HtmlArtThumbnail src={artHtmlUrl} dims={dims} />
+        ) : currentUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={currentUrl}
+            alt={c.title}
+            className="w-full h-full object-cover object-top"
+            onError={(e) => { e.currentTarget.style.display = 'none' }}
+          />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-2 py-8">
+            <ImageIcon className="w-10 h-10 opacity-30" style={{ color: typeColor }} />
+            <span className="text-xs font-medium opacity-50" style={{ color: typeColor }}>
+              {CONTENT_TYPE_LABELS[c.content_type as keyof typeof CONTENT_TYPE_LABELS]}
+            </span>
+          </div>
+        )}
+
+        {/* Navegação de slides para carrossel */}
+        {isCarousel && total > 1 && (
+          <>
+            <button
+              onClick={(e) => { e.stopPropagation(); setSlideIdx(i => Math.max(0, i - 1)) }}
+              disabled={slideIdx === 0}
+              className="absolute left-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center disabled:opacity-20 transition-colors z-10"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setSlideIdx(i => Math.min(total - 1, i + 1)) }}
+              disabled={slideIdx === total - 1}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center disabled:opacity-20 transition-colors z-10"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+
+            {/* Dots */}
+            <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1 z-10">
+              {imageUrls.map((_, i) => (
+                <button
+                  key={i}
+                  onClick={(e) => { e.stopPropagation(); setSlideIdx(i) }}
+                  className={cn('rounded-full transition-all',
+                    i === slideIdx ? 'w-4 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/60 hover:bg-white/80'
+                  )}
+                />
+              ))}
+            </div>
+
+            {/* Contador */}
+            <div className="absolute top-8 right-2 bg-black/50 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full z-10">
+              {slideIdx + 1}/{total}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -104,7 +199,6 @@ export function ContentCard({ content: c }: ContentCardProps) {
   const dims: [number, number] = c.art_width && c.art_height
     ? [c.art_width, c.art_height]
     : (AR_DIMS[c.content_type] ?? [1080, 1080])
-  const aspectRatio = `${dims[0]}/${dims[1]}`
 
   async function handleDelete() {
     if (!confirmDelete) {
@@ -157,49 +251,34 @@ export function ContentCard({ content: c }: ContentCardProps) {
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden hover:shadow-md transition-shadow group">
-      {/* Thumbnail */}
-      <div
-        className="relative w-full flex items-center justify-center overflow-hidden"
-        style={{ aspectRatio, backgroundColor: typeColor + '15' }}
-      >
-        {hasArtHtml ? (
-          <HtmlArtThumbnail html={c.art_html!} dims={dims} />
-        ) : artHtmlUrl ? (
-          <HtmlArtThumbnail src={artHtmlUrl} dims={dims} />
-        ) : artImageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={artImageUrl}
-            alt={c.title}
-            className="w-full h-full object-cover"
-            onError={(e) => { e.currentTarget.style.display = 'none' }}
-          />
-        ) : (
-          <div className="flex flex-col items-center gap-2 py-8">
-            <ImageIcon className="w-10 h-10 opacity-30" style={{ color: typeColor }} />
-            <span className="text-xs font-medium opacity-50" style={{ color: typeColor }}>
-              {CONTENT_TYPE_LABELS[c.content_type as keyof typeof CONTENT_TYPE_LABELS]}
-            </span>
-          </div>
-        )}
+      {/* Thumbnail com aspect ratio correto e altura máxima controlada */}
+      <div className="relative">
+        <CardThumbnail
+          content={c}
+          dims={dims}
+          typeColor={typeColor}
+          artImageUrl={artImageUrl}
+          hasArtHtml={hasArtHtml}
+          artHtmlUrl={artHtmlUrl}
+        />
 
-        {/* Status */}
-        <div className="absolute top-2 right-2">
+        {/* Status badge */}
+        <div className="absolute top-2 right-2 z-10">
           <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${st?.color ?? 'bg-slate-100 text-slate-600'}`}>
             {st?.label}
           </span>
         </div>
 
-        {/* Tipo */}
+        {/* Tipo badge */}
         <div
-          className="absolute top-2 left-2 text-white text-[10px] font-bold px-2 py-0.5 rounded-full"
+          className="absolute top-2 left-2 z-10 text-white text-[10px] font-bold px-2 py-0.5 rounded-full"
           style={{ backgroundColor: typeColor }}
         >
           {CONTENT_TYPE_LABELS[c.content_type as keyof typeof CONTENT_TYPE_LABELS]}
         </div>
 
-        {/* Action buttons — aparecem no hover */}
-        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+        {/* Action buttons no hover */}
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 z-20">
           <Link href={`/conteudos/${c.id}/editar`}>
             <button className="flex items-center gap-1.5 px-3 py-2 bg-white rounded-xl text-xs font-bold text-slate-800 hover:bg-slate-100 transition-colors shadow">
               <Pencil className="w-3.5 h-3.5" /> Editar
@@ -211,10 +290,7 @@ export function ContentCard({ content: c }: ContentCardProps) {
               disabled={downloading}
               className="flex items-center gap-1.5 px-3 py-2 bg-ze-blue text-white rounded-xl text-xs font-bold hover:bg-ze-blue/90 transition-colors shadow disabled:opacity-60"
             >
-              {downloading
-                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                : <Download className="w-3.5 h-3.5" />
-              }
+              {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
               {downloading ? 'Exportando...' : 'Baixar PNG'}
             </button>
           )}
@@ -222,21 +298,16 @@ export function ContentCard({ content: c }: ContentCardProps) {
             onClick={handleDelete}
             disabled={deleting}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow ${
-              confirmDelete
-                ? 'bg-red-500 text-white hover:bg-red-600'
-                : 'bg-white text-red-500 hover:bg-red-50'
+              confirmDelete ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-white text-red-500 hover:bg-red-50'
             }`}
           >
-            {deleting
-              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              : <Trash2 className="w-3.5 h-3.5" />
-            }
+            {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
             {deleting ? 'Deletando...' : confirmDelete ? 'Confirmar?' : 'Deletar'}
           </button>
         </div>
       </div>
 
-      {/* Content */}
+      {/* Conteúdo */}
       <div className="p-4">
         <h3 className="font-bold text-slate-900 text-sm leading-snug line-clamp-2 mb-2">{c.title}</h3>
 
@@ -247,10 +318,7 @@ export function ContentCard({ content: c }: ContentCardProps) {
         {c.platforms?.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-3">
             {c.platforms.map((p: string) => (
-              <span
-                key={p}
-                className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600"
-              >
+              <span key={p} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
                 {PLATFORM_LABELS[p] ?? p}
               </span>
             ))}
@@ -273,10 +341,7 @@ export function ContentCard({ content: c }: ContentCardProps) {
                   title="Baixar arte como PNG"
                   className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-ze-blue hover:bg-ze-blue/10 transition-colors disabled:opacity-40"
                 >
-                  {downloading
-                    ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    : <Download className="w-3.5 h-3.5" />
-                  }
+                  {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                 </button>
               )}
               <Link href={`/conteudos/${c.id}/editar`}>
@@ -288,24 +353,17 @@ export function ContentCard({ content: c }: ContentCardProps) {
                 onClick={handleDelete}
                 disabled={deleting}
                 className={`w-7 h-7 flex items-center justify-center rounded-lg transition-colors ${
-                  confirmDelete
-                    ? 'bg-red-500 text-white'
-                    : 'text-slate-400 hover:text-red-500 hover:bg-red-50'
+                  confirmDelete ? 'bg-red-500 text-white' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'
                 }`}
               >
-                {deleting
-                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  : <Trash2 className="w-3.5 h-3.5" />
-                }
+                {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
               </button>
             </div>
           </div>
         </div>
 
         {confirmDelete && !deleting && (
-          <p className="text-[10px] text-red-500 font-semibold mt-1 text-right">
-            Clique novamente para confirmar
-          </p>
+          <p className="text-[10px] text-red-500 font-semibold mt-1 text-right">Clique novamente para confirmar</p>
         )}
       </div>
     </div>

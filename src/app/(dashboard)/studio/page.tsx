@@ -5,9 +5,10 @@ import { createClient } from '@/lib/supabase/client'
 import { CONTENT_TYPE_LABELS, CREATIVE_JOB_STATUS_LABELS, type CreativeJob, type CreativeJobStatus } from '@/types'
 import {
   Upload, X, CheckCircle2, Loader2, AlertCircle, Download,
-  Wand2, Star, ChevronDown, ChevronUp, RefreshCw, Sparkles, ImageIcon,
+  Wand2, Star, ChevronDown, ChevronUp, RefreshCw, Sparkles, ImageIcon, Layers,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { CarouselPreview } from '@/components/studio/CarouselPreview'
 
 // ── Pipeline steps (em ordem) ─────────────────────────────────
 const PIPELINE_STEPS: CreativeJobStatus[] = [
@@ -15,6 +16,17 @@ const PIPELINE_STEPS: CreativeJobStatus[] = [
   'strategizing', 'copywriting', 'creative_directing',
   'prompt_engineering', 'generating_image', 'visual_review', 'done',
 ]
+
+const CAROUSEL_PIPELINE_STEPS: CreativeJobStatus[] = [
+  'bg_removing', 'analyzing', 'palette_extracting',
+  'strategizing', 'copywriting', 'creative_directing',
+  'carousel_planning', 'carousel_generating', 'done',
+]
+
+const SLIDE_ROLES_PT: Record<string, string> = {
+  HOOK: 'Gancho', CONTEXT: 'Contexto', VALUE: 'Valor', PROOF: 'Prova', CTA: 'CTA',
+}
+const SLIDE_ROLES_ORDER = ['HOOK', 'CONTEXT', 'VALUE', 'PROOF', 'CTA']
 
 type PageState = 'form' | 'pipeline' | 'review'
 
@@ -91,6 +103,7 @@ export default function StudioPage() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [job, setJob] = useState<Partial<CreativeJob> | null>(null)
   const pollingRef = useRef<NodeJS.Timeout | null>(null)
+  const [regeneratingSlides, setRegeneratingSlides] = useState<number[]>([])
 
   const [showIssues, setShowIssues] = useState(false)
   const [isApproving, setIsApproving] = useState(false)
@@ -161,7 +174,28 @@ export default function StudioPage() {
     if (!company || !briefing.trim()) return
     setIsSubmitting(true)
     try {
-      const res = await fetch('/api/studio/gerar-arte', {
+      const isCarousel = contentType === 'carrossel'
+      const endpoint = isCarousel ? '/api/studio/gerar-carrossel' : '/api/studio/gerar-arte'
+
+      // Detecta quantidade de slides mencionada no briefing (ex: "7 slides", "3 slides", "quatro slides")
+      let detectedSlideCount = 5
+      if (isCarousel) {
+        const numWords: Record<string, number> = {
+          dois: 2, duas: 2, três: 3, tres: 3, quatro: 4, cinco: 5,
+          seis: 6, sete: 7, oito: 8, nove: 9, dez: 10,
+          two: 2, three: 3, four: 4, five: 5, six: 6,
+          seven: 7, eight: 8, nine: 9, ten: 10,
+        }
+        const digitMatch = briefing.match(/\b([2-9]|10)\s*slides?\b/i)
+        const wordMatch = briefing.match(/\b(dois|duas|três|tres|quatro|cinco|seis|sete|oito|nove|dez|two|three|four|five|six|seven|eight|nine|ten)\s*slides?\b/i)
+        if (digitMatch) {
+          detectedSlideCount = Math.max(2, Math.min(10, parseInt(digitMatch[1])))
+        } else if (wordMatch) {
+          detectedSlideCount = numWords[wordMatch[1].toLowerCase()] ?? 5
+        }
+      }
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -171,6 +205,7 @@ export default function StudioPage() {
           productImageUrl: productImageUrl ?? undefined,
           hasTransparentBg,
           referenceImageUrl: referenceImageUrl ?? undefined,
+          ...(isCarousel ? { slideCount: detectedSlideCount } : {}),
         }),
       })
       const { jobId: id } = await res.json()
@@ -190,11 +225,25 @@ export default function StudioPage() {
 
   const handleApprove = async () => {
     if (!company || isApproving) return
-    const imageUrl = job?.final_png_url ?? job?.generated_image_url
-    if (!imageUrl) return
+    const isCarousel = job?.is_carousel
     const [W, H] = getSize(contentType)
     setIsApproving(true)
     try {
+      let mediaUrls: string[]
+      if (isCarousel && job?.carousel_slides?.length) {
+        // Carrossel: preserva a ordem dos slides
+        mediaUrls = (job.carousel_slides)
+          .filter(s => s.status === 'done' && s.url)
+          .sort((a, b) => a.index - b.index)
+          .map(s => s.url)
+      } else {
+        const singleUrl = job?.final_png_url ?? job?.generated_image_url
+        if (!singleUrl) { setIsApproving(false); return }
+        mediaUrls = [singleUrl]
+      }
+
+      if (mediaUrls.length === 0) { setIsApproving(false); return }
+
       const { data: content } = await supabase.from('contents').insert({
         company_id: company.id,
         title: `Studio: ${briefing.slice(0, 50)}`,
@@ -202,7 +251,7 @@ export default function StudioPage() {
         content_type: contentType,
         platforms: [],
         status: 'pendente_aprovacao',
-        media_urls: [imageUrl],
+        media_urls: mediaUrls,
         art_width: W,
         art_height: H,
       }).select('id').single()
@@ -214,7 +263,7 @@ export default function StudioPage() {
           status: 'pendente',
         })
         await supabase.from('creative_jobs').update({ content_id: content.id }).eq('id', jobId)
-        setToastMsg('Arte aprovada! Já está na biblioteca.')
+        setToastMsg(isCarousel ? `Carrossel aprovado! ${mediaUrls.length} slides na biblioteca.` : 'Arte aprovada! Já está na biblioteca.')
         setTimeout(() => {
           setToastMsg(null)
           router.push('/conteudos')
@@ -222,6 +271,41 @@ export default function StudioPage() {
       }
     } finally {
       setIsApproving(false)
+    }
+  }
+
+  const handleRegenerateSlide = async (slideIndex: number) => {
+    if (!jobId) return
+    setRegeneratingSlides(prev => [...prev, slideIndex])
+    try {
+      await fetch('/api/studio/regenerar-slide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId, slideIndex }),
+      })
+      // Retoma polling para capturar o resultado
+      if (pollingRef.current) clearInterval(pollingRef.current)
+      pollingRef.current = setInterval(() => pollJob(jobId), 1500)
+    } catch (err) {
+      console.error('Erro ao regenerar slide:', err)
+      setRegeneratingSlides(prev => prev.filter(i => i !== slideIndex))
+    }
+  }
+
+  // Remove slide da lista de regenerando quando ele concluir
+  const prevSlidesRef = useRef<number[]>([])
+  if (job?.carousel_slides) {
+    const nowDone = job.carousel_slides.filter(s => s.status === 'done').map(s => s.index)
+    const newlyDone = regeneratingSlides.filter(i => nowDone.includes(i))
+    if (newlyDone.length > 0 && regeneratingSlides.length > 0) {
+      // Limpa polling se job done e nenhum slide ainda regenerando
+      const stillRegen = regeneratingSlides.filter(i => !newlyDone.includes(i))
+      if (stillRegen.length < regeneratingSlides.length) {
+        setTimeout(() => setRegeneratingSlides(stillRegen), 0)
+        if (stillRegen.length === 0 && job?.status === 'done') {
+          if (pollingRef.current) clearInterval(pollingRef.current)
+        }
+      }
     }
   }
 
@@ -235,11 +319,18 @@ export default function StudioPage() {
     a.click()
   }
 
-  const currentStepIndex = job ? PIPELINE_STEPS.indexOf(job.status as CreativeJobStatus) : -1
+  const isCarouselJob = job?.is_carousel === true
+  const activePipelineSteps = isCarouselJob ? CAROUSEL_PIPELINE_STEPS : PIPELINE_STEPS
+  const currentStepIndex = job ? activePipelineSteps.indexOf(job.status as CreativeJobStatus) : -1
   const critique = job?.critique
   const visualScore = job?.visual_score
   // final_png_url = composite com texto; generated_image_url = imagem crua sem texto
   const imageUrl = job?.final_png_url ?? job?.generated_image_url
+
+  // Extrai progresso dos slides do carrossel para o preview de loading
+  const carouselSlides = job?.carousel_slides ?? []
+  const doneSlideCount = carouselSlides.filter(s => s.status === 'done').length
+  const slideCountLabel = job?.carousel_slide_count ?? 5
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -397,8 +488,12 @@ export default function StudioPage() {
                 disabled={isSubmitting || !briefing.trim() || !company || isUploading}
                 className="w-full py-4 rounded-xl bg-gradient-to-r from-ze-blue to-ze-orange text-white font-black text-base disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
               >
-                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wand2 className="w-5 h-5" />}
-                {isSubmitting ? 'Iniciando...' : 'Gerar Imagem Premium'}
+                {isSubmitting
+                  ? <Loader2 className="w-5 h-5 animate-spin" />
+                  : contentType === 'carrossel' ? <Layers className="w-5 h-5" /> : <Wand2 className="w-5 h-5" />}
+                {isSubmitting
+                  ? 'Iniciando...'
+                  : contentType === 'carrossel' ? 'Gerar Carrossel Premium' : 'Gerar Imagem Premium'}
               </button>
             </div>
           </div>
@@ -407,26 +502,110 @@ export default function StudioPage() {
         {/* ── Estado B: Pipeline ── */}
         {pageState === 'pipeline' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* ── Painel esquerdo: etapas ── */}
             <div className="bg-white rounded-2xl border border-slate-200 p-6">
-              <h2 className="font-bold text-slate-800 mb-1">Agentes trabalhando...</h2>
-              <p className="text-sm text-slate-400 mb-5">Acompanhe em tempo real</p>
+              <div className="flex items-center gap-2 mb-1">
+                {isCarouselJob && <Layers className="w-4 h-4 text-ze-orange" />}
+                <h2 className="font-bold text-slate-800">
+                  {isCarouselJob ? 'Criando carrossel...' : 'Agentes trabalhando...'}
+                </h2>
+              </div>
+              <p className="text-sm text-slate-400 mb-4">Acompanhe em tempo real</p>
 
-              <div className="w-full h-2 bg-slate-100 rounded-full mb-6 overflow-hidden">
+              <div className="w-full h-2 bg-slate-100 rounded-full mb-5 overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-ze-blue to-ze-orange rounded-full transition-all duration-500"
                   style={{ width: `${job?.progress_pct ?? 0}%` }}
                 />
               </div>
 
-              <div className="space-y-2">
-                {PIPELINE_STEPS.filter(s => s !== 'done').map((step, idx) => {
+              <div className="space-y-1.5">
+                {activePipelineSteps.filter(s => s !== 'done').map((step, idx) => {
                   const isDone = currentStepIndex > idx || job?.status === 'done'
                   const isActive = job?.status === step || (step === 'bg_removing' && job?.status === 'pending')
                   const isFailed = job?.status === 'failed' && isActive
                   const info = CREATIVE_JOB_STATUS_LABELS[step]
+
+                  // Para carrossel: substitui a linha carousel_generating por N linhas individuais
+                  if (step === 'carousel_generating' && isCarouselJob) {
+                    const inSlidesPhase = job?.status === 'carousel_generating' || isDone
+                    return (
+                      <div key="carousel_generating">
+                        {/* Cabeçalho da fase de slides */}
+                        <div className={cn(
+                          'flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all mb-1',
+                          inSlidesPhase && !isDone ? 'bg-ze-blue/5 border border-ze-blue/20' : '',
+                          isDone ? 'opacity-60' : '',
+                        )}>
+                          <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0">
+                            {isDone
+                              ? <CheckCircle2 className="w-5 h-5 text-green-500" />
+                              : inSlidesPhase
+                                ? <Loader2 className="w-5 h-5 animate-spin text-ze-blue" />
+                                : <div className="w-5 h-5 rounded-full border-2 border-slate-200" />}
+                          </div>
+                          <p className={cn(
+                            'text-sm font-semibold',
+                            inSlidesPhase && !isDone ? 'text-ze-blue' : isDone ? 'text-slate-500' : 'text-slate-400'
+                          )}>
+                            🎠 Gerando slides do carrossel
+                          </p>
+                        </div>
+
+                        {/* Linhas individuais por slide */}
+                        {inSlidesPhase && (
+                          <div className="ml-4 pl-4 border-l-2 border-slate-100 space-y-1 mb-1">
+                            {Array.from({ length: slideCountLabel }).map((_, si) => {
+                              const slideNum = si + 1
+                              const slideData = carouselSlides.find(s => s.index === slideNum)
+                              const role = slideData?.role ?? SLIDE_ROLES_ORDER[si]
+                              const roleLabel = SLIDE_ROLES_PT[role] ?? role
+                              const slideDone = slideData?.status === 'done' || (isDone && !!slideData)
+                              const slideGenerating = slideData?.status === 'generating'
+                              const slideFailed = slideData?.status === 'failed'
+                              return (
+                                <div key={slideNum} className={cn(
+                                  'flex items-center gap-2.5 px-3 py-2 rounded-lg transition-all',
+                                  slideGenerating ? 'bg-ze-orange/5 border border-ze-orange/20' : '',
+                                )}>
+                                  <div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
+                                    {slideFailed
+                                      ? <AlertCircle className="w-4 h-4 text-red-400" />
+                                      : slideDone
+                                        ? <CheckCircle2 className="w-4 h-4 text-green-500" />
+                                        : slideGenerating
+                                          ? <Loader2 className="w-4 h-4 animate-spin text-ze-orange" />
+                                          : <div className="w-3.5 h-3.5 rounded-full border-2 border-slate-200" />}
+                                  </div>
+                                  <span className={cn(
+                                    'text-xs font-medium',
+                                    slideGenerating ? 'text-ze-orange font-semibold' :
+                                    slideDone ? 'text-slate-500' : 'text-slate-400'
+                                  )}>
+                                    Slide {slideNum} — {roleLabel}
+                                  </span>
+                                  {slideGenerating && (
+                                    <span className="ml-auto text-[10px] text-ze-orange font-bold animate-pulse">
+                                      criando...
+                                    </span>
+                                  )}
+                                  {slideDone && slideData?.score > 0 && (
+                                    <span className="ml-auto text-[10px] text-green-600 font-semibold">
+                                      {slideData.score}/100
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  }
+
                   return (
                     <div key={step} className={cn(
-                      'flex items-center gap-3 px-4 py-3 rounded-xl transition-all',
+                      'flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all',
                       isActive && !isFailed ? 'bg-ze-blue/5 border border-ze-blue/20' : '',
                       isDone ? 'opacity-60' : '',
                     )}>
@@ -455,25 +634,139 @@ export default function StudioPage() {
               )}
             </div>
 
-            {/* Preview em tempo real */}
+            {/* ── Painel direito: preview ── */}
             <div className="bg-white rounded-2xl border border-slate-200 p-6">
-              <h2 className="font-bold text-slate-800 mb-4">Preview</h2>
-              {imageUrl ? (
-                <div className="bg-slate-50 rounded-xl overflow-hidden flex items-center justify-center">
-                  <img src={imageUrl} alt="arte gerada" className="max-w-full max-h-96 object-contain" onError={e => { const fb = job?.generated_image_url; if (fb && e.currentTarget.src !== fb) e.currentTarget.src = fb }} />
+              {isCarouselJob ? (
+                <div className="space-y-4">
+                  {/* Cabeçalho com progresso */}
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-bold text-slate-800">Preview do carrossel</h2>
+                    {doneSlideCount > 0 && (
+                      <span className="text-xs font-semibold text-ze-orange bg-ze-orange/10 px-2.5 py-1 rounded-full">
+                        {doneSlideCount}/{slideCountLabel} prontos
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Slide atual em destaque */}
+                  {(() => {
+                    const generatingSlide = carouselSlides.find(s => s.status === 'generating')
+                    const lastDoneSlide = [...carouselSlides].filter(s => s.status === 'done').sort((a, b) => b.index - a.index)[0]
+                    const activeSlide = generatingSlide ?? lastDoneSlide
+                    const activeRole = activeSlide?.role ?? SLIDE_ROLES_ORDER[doneSlideCount]
+                    const activeRoleLabel = SLIDE_ROLES_PT[activeRole] ?? activeRole
+                    const activeSlideNum = activeSlide?.index ?? (doneSlideCount + 1)
+
+                    return (
+                      <div className="relative rounded-xl overflow-hidden bg-slate-100" style={{ paddingBottom: '80%' }}>
+                        {lastDoneSlide?.url && !generatingSlide ? (
+                          <img
+                            src={lastDoneSlide.url}
+                            alt={`Slide ${lastDoneSlide.index}`}
+                            className="absolute inset-0 w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-slate-100 to-slate-200">
+                            <Loader2 className="w-10 h-10 animate-spin text-ze-blue/40" />
+                          </div>
+                        )}
+                        {/* Overlay com info do slide atual */}
+                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-white text-xs font-medium opacity-80">
+                                {generatingSlide ? 'Criando agora' : lastDoneSlide ? 'Último concluído' : 'Aguardando...'}
+                              </p>
+                              <p className="text-white text-sm font-bold">
+                                Slide {activeSlideNum} de {slideCountLabel} — {activeRoleLabel}
+                              </p>
+                            </div>
+                            {generatingSlide && (
+                              <Loader2 className="w-5 h-5 animate-spin text-white" />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  {/* Thumbnails strip */}
+                  <div className="flex gap-2">
+                    {Array.from({ length: slideCountLabel }).map((_, si) => {
+                      const slideNum = si + 1
+                      const slideData = carouselSlides.find(s => s.index === slideNum)
+                      const isGen = slideData?.status === 'generating'
+                      const isDone = slideData?.status === 'done'
+                      return (
+                        <div
+                          key={slideNum}
+                          className={cn(
+                            'relative flex-1 rounded-lg overflow-hidden bg-slate-100 flex-shrink-0',
+                            isGen ? 'ring-2 ring-ze-orange ring-offset-1' : '',
+                          )}
+                          style={{ aspectRatio: '4/5' }}
+                        >
+                          {isDone && slideData?.url ? (
+                            <img src={slideData.url} alt={`Slide ${slideNum}`} className="w-full h-full object-cover" />
+                          ) : isGen ? (
+                            <div className="w-full h-full flex items-center justify-center bg-ze-orange/10">
+                              <Loader2 className="w-4 h-4 animate-spin text-ze-orange" />
+                            </div>
+                          ) : (
+                            <div className="w-full h-full bg-slate-200 animate-pulse" />
+                          )}
+                          <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] text-center py-0.5 font-bold">
+                            {slideNum}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  <p className="text-xs text-slate-400 text-center">
+                    {doneSlideCount === 0
+                      ? 'Preparando narrativa do carrossel...'
+                      : doneSlideCount < slideCountLabel
+                        ? `${slideCountLabel - doneSlideCount} slides restantes...`
+                        : 'Finalizando carrossel...'}
+                  </p>
                 </div>
               ) : (
-                <div className="aspect-square bg-slate-50 rounded-xl flex flex-col items-center justify-center gap-3">
-                  <Loader2 className="w-8 h-8 animate-spin text-slate-300" />
-                  <p className="text-sm text-slate-400">Gerando sua imagem...</p>
-                </div>
+                <>
+                  <h2 className="font-bold text-slate-800 mb-4">Preview</h2>
+                  {imageUrl ? (
+                    <div className="bg-slate-50 rounded-xl overflow-hidden flex items-center justify-center">
+                      <img src={imageUrl} alt="arte gerada" className="max-w-full max-h-96 object-contain" onError={e => { const fb = job?.generated_image_url; if (fb && e.currentTarget.src !== fb) e.currentTarget.src = fb }} />
+                    </div>
+                  ) : (
+                    <div className="aspect-square bg-slate-50 rounded-xl flex flex-col items-center justify-center gap-3">
+                      <Loader2 className="w-8 h-8 animate-spin text-slate-300" />
+                      <p className="text-sm text-slate-400">Gerando sua imagem...</p>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
         )}
 
-        {/* ── Estado C: Revisão ── */}
-        {pageState === 'review' && job && (
+        {/* ── Estado C: Revisão — Carrossel ── */}
+        {pageState === 'review' && job && isCarouselJob && carouselSlides.length > 0 && (
+          <div className="max-w-xl mx-auto">
+            <CarouselPreview
+              slides={carouselSlides}
+              overallScore={visualScore}
+              isApproving={isApproving}
+              onApprove={handleApprove}
+              onNewArt={() => { setPageState('form'); setJob(null); setJobId(null); setRegeneratingSlides([]) }}
+              onRegenerateSlide={handleRegenerateSlide}
+              regeneratingSlides={regeneratingSlides}
+            />
+          </div>
+        )}
+
+        {/* ── Estado C: Revisão — Post único ── */}
+        {pageState === 'review' && job && !isCarouselJob && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
               {/* Imagem gerada */}
@@ -636,7 +929,7 @@ function getSize(contentType: string): [number, number] {
     post_linkedin_imagem: [1200, 627],
     post_linkedin_texto: [1080, 1080],
     stories: [1080, 1920],
-    carrossel: [1080, 1080],
+    carrossel: [1080, 1350],
     youtube: [1280, 720],
     reels: [1080, 1920],
   }

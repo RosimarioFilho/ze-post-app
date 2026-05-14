@@ -185,8 +185,44 @@ export type CreativeJobStatus =
   | 'generating_image'
   | 'visual_review'
   | 'regenerating'
+  | 'carousel_planning'
+  | 'carousel_generating'
   | 'done'
   | 'failed'
+
+// ── Carousel Narrative Engine ─────────────────────────────────
+
+export type SlideRole = 'HOOK' | 'CONTEXT' | 'VALUE' | 'PROOF' | 'CTA'
+
+export interface CarouselSlidePlan {
+  index: number
+  role: SlideRole
+  objective: string
+  headline: string
+  subline: string
+  cta?: string
+  energyLevel: 'HIGH' | 'MEDIUM_HIGH' | 'MEDIUM' | 'DEEP' | 'EMOTIONAL'
+  layoutSuggestion: string
+}
+
+export interface CarouselNarrativePlan {
+  overallObjective: string
+  targetAction: string
+  emotionalArc: string
+  slides: CarouselSlidePlan[]
+}
+
+export interface CarouselSlideResult {
+  index: number
+  role: SlideRole
+  url: string
+  copyOutput: { headline: string; subline: string; cta?: string; caption?: string }
+  score: number
+  status: 'pending' | 'generating' | 'done' | 'failed'
+  errorMessage?: string
+  layoutUsed?: string
+  styleUsed?: string
+}
 
 export interface CreativeBrief {
   niche_key: string
@@ -239,6 +275,10 @@ export interface CreativeJob {
   final_png_url?: string
   content_id?: string
   error_message?: string
+  is_carousel?: boolean
+  carousel_slide_count?: number
+  carousel_plan?: CarouselNarrativePlan
+  carousel_slides?: CarouselSlideResult[]
   created_at: string
   updated_at: string
 }
@@ -283,6 +323,8 @@ export const CREATIVE_JOB_STATUS_LABELS: Record<CreativeJobStatus, { label: stri
   generating_image:    { label: 'Gerando imagem com IA...', emoji: '🖼️' },
   visual_review:       { label: 'Crítico avaliando imagem...', emoji: '🧐' },
   regenerating:        { label: 'Refinando imagem...', emoji: '🔄' },
+  carousel_planning:   { label: 'Planejando narrativa do carrossel...', emoji: '📖' },
+  carousel_generating: { label: 'Gerando slides do carrossel...', emoji: '🎠' },
   done:                { label: 'Arte pronta!', emoji: '✅' },
   failed:              { label: 'Erro no processo', emoji: '❌' },
 }

@@ -11,14 +11,7 @@ export async function GET(req: NextRequest) {
 
   const { data: job, error } = await supabase
     .from('creative_jobs')
-    .select(`
-      id, status, current_agent, progress_pct,
-      vision_analysis, palette, strategy, copy_output,
-      art_direction, rendered_png_url, critique,
-      correction_attempts, final_html, final_png_url,
-      generated_image_url, image_provider, visual_score, retry_count,
-      error_message, created_at, updated_at
-    `)
+    .select('*')
     .eq('id', jobId)
     .single()
 

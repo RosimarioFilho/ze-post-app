@@ -20,7 +20,7 @@ export const AR_SIZES: Record<string, [number, number]> = {
   post_linkedin_imagem: [1200, 627],
   post_linkedin_texto: [1080, 1080],
   stories: [1080, 1920],
-  carrossel: [1080, 1080],
+  carrossel: [1080, 1350],  // 4:5 Instagram Carousel
   youtube: [1280, 720],
   reels: [1080, 1920],
 }
