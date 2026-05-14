@@ -10,27 +10,30 @@ export async function POST(req: NextRequest) {
       objective: string
       niche: ZePremiumNiche
       style: ZePremiumStyle
+      headline: string
+      subheadline?: string
       cta?: string
       productImageBase64?: string
       productImageMime?: string
     }
 
-    const { objective, niche, style, cta, productImageBase64, productImageMime } = body
+    const { objective, niche, style, headline, subheadline, cta, productImageBase64, productImageMime } = body
 
-    if (!objective?.trim()) {
-      return NextResponse.json({ error: 'Objetivo da arte é obrigatório' }, { status: 400 })
+    if (!headline?.trim()) {
+      return NextResponse.json({ error: 'Headline é obrigatória' }, { status: 400 })
     }
 
     const prompt = buildZePremiumPrompt({
-      objective,
+      objective: objective ?? '',
       niche: niche ?? 'corporativo',
       style: style ?? 'premium_dark',
+      headline,
+      subheadline,
       cta,
       hasProductImage: !!productImageBase64,
-      hasLogo: false,
     })
 
-    console.log(`[ze-premium] Gerando arte — niche=${niche} style=${style} hasProduct=${!!productImageBase64}`)
+    console.log(`[ze-premium] Gerando arte — niche=${niche} style=${style} headline="${headline}" hasProduct=${!!productImageBase64}`)
     console.log(`[ze-premium] Prompt: ${prompt.slice(0, 200)}...`)
 
     const result = await generateImage(

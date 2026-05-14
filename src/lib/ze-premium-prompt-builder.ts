@@ -1,6 +1,7 @@
 // ── Zé Premium — Prompt Builder ───────────────────────────────────
-// Transforma os campos do formulário em prompts cinematográficos modulares.
-// Não usa coordinate engine nem CSS procedural — o modelo resolve a composição.
+// Gera prompts multimodais que instruem o modelo a compor headline,
+// subheadline e CTA diretamente dentro da imagem gerada.
+// Sem overlay, sem HTML, sem composição posterior.
 
 export type ZePremiumNiche =
   | 'automotivo'
@@ -28,134 +29,174 @@ interface StylePreset {
   lighting: string
   composition: string
   atmosphere: string
+  typography: string
   quality: string
 }
 
 const STYLE_PRESETS: Record<ZePremiumStyle, StylePreset> = {
   automotive_premium: {
-    style: 'premium automotive advertising campaign, dealership campaign photography',
-    mood: 'powerful, aspirational, high-status, cinematic drama',
-    lighting: 'dramatic automotive studio lighting, rim light on vehicle body panels, floor reflection, side spotlights',
-    composition: 'hero vehicle as main subject filling 65% of frame, clear area for typography on left side, depth of field blur on background',
-    atmosphere: 'deep black premium background, subtle red accent gradient, professional showroom feel',
-    quality: 'ultra realistic automotive photography, agency campaign quality, hyper detailed, no text, no watermarks',
+    style: 'premium automotive advertising campaign, luxury dealership visual, Jeep and BMW campaign aesthetic',
+    mood: 'powerful, aspirational, high-status, cinematic drama, aggressive premium energy',
+    lighting: 'dramatic automotive studio lighting, strong rim light outlining vehicle body panels, clean floor reflection, side spotlights creating depth',
+    composition: 'hero vehicle positioned on right side filling 55% of frame, clear dark left panel for typography, depth of field background blur, product never obscured by text',
+    atmosphere: 'deep black luxury background, subtle red accent gradient behind vehicle, professional premium showroom depth',
+    typography: 'bold heavy advertising typeface, large headline left-aligned, clean white sans-serif letters with high contrast against dark background, modern premium typography hierarchy',
+    quality: 'ultra realistic automotive photography render, campaign agency quality, hyper detailed, sharp vehicle details, professional social media advertising',
   },
   premium_dark: {
-    style: 'premium dark advertising campaign, high-end brand visual',
-    mood: 'sophisticated, powerful, premium quality, aspirational',
-    lighting: 'dramatic studio lighting, rim light, strong contrast, deep shadows',
-    composition: 'product hero center composition, clean negative space, depth and layering',
-    atmosphere: 'deep black background, gold or silver metallic accents, luxury feel',
-    quality: 'ultra realistic product photography, luxury brand quality, hyper detailed, no text, no watermarks',
+    style: 'premium dark advertising campaign, high-end brand visual, luxury commercial design',
+    mood: 'sophisticated, powerful, premium quality, aspirational status',
+    lighting: 'dramatic studio lighting, strong rim light, high contrast, deep controlled shadows',
+    composition: 'product hero center-left composition, dark right panel for typography, clean negative space',
+    atmosphere: 'deep black background, gold or silver metallic accent elements, luxury brand feel',
+    typography: 'bold premium sans-serif typeface, large impactful headline, clean white text, strong typographic hierarchy',
+    quality: 'ultra realistic premium product rendering, luxury brand campaign quality, hyper detailed, professional advertising',
   },
   luxury: {
-    style: 'luxury brand advertising, high fashion commercial photography',
-    mood: 'exclusive, elegant, timeless, prestigious',
-    lighting: 'soft luxury studio lighting, beauty light, subtle warm tones, no harsh shadows',
-    composition: 'centered premium composition, editorial balance, breathing space around subject',
-    atmosphere: 'champagne and gold tones, silky dark background, refined elegance',
-    quality: 'luxury commercial photography, fashion editorial quality, flawless, no text, no watermarks',
+    style: 'luxury brand advertising, high fashion editorial, Chanel and Louis Vuitton campaign level',
+    mood: 'exclusive, timeless, prestigious, editorial elegance',
+    lighting: 'soft luxury beauty lighting, even warm studio tones, no harsh shadows, sculpted highlights',
+    composition: 'centered premium composition, editorial breathing space, subject commanding attention',
+    atmosphere: 'champagne and gold tones, silky dark charcoal background, refined luxury depth',
+    typography: 'elegant thin serif typeface for headline, refined spacing, sophisticated editorial typography, minimal and clean',
+    quality: 'luxury editorial photography render, flawless premium quality, fashion campaign level',
   },
   modern_clean: {
-    style: 'modern clean commercial advertising, minimal premium brand',
-    mood: 'fresh, confident, innovative, trustworthy',
-    lighting: 'bright even studio lighting, soft shadows, clean white tones',
-    composition: 'product centered, minimal clutter, lots of breathing room, geometric balance',
-    atmosphere: 'white or light gray clean background, subtle product shadow, crisp edges',
-    quality: 'high resolution product photography, studio clean quality, sharp, no text, no watermarks',
+    style: 'modern clean commercial advertising, Apple and Google campaign aesthetic, premium tech brand',
+    mood: 'fresh, confident, innovative, trustworthy, forward-thinking',
+    lighting: 'bright clean studio lighting, soft even shadows, crisp product edge definition',
+    composition: 'product centered or left, clean white right panel area for typography, geometric balance',
+    atmosphere: 'white or very light gray premium background, crisp product shadow, clean minimal environment',
+    typography: 'clean modern geometric sans-serif, large confident headline, dark text on light background, Apple-style typography clarity',
+    quality: 'studio product photography render, ultra clean sharp quality, professional brand campaign',
   },
   cinematic: {
-    style: 'cinematic commercial film still, movie poster advertising aesthetic',
-    mood: 'dramatic, epic, emotional, storytelling-focused',
-    lighting: 'cinematic lighting, volumetric rays, golden hour warmth or cool blue dramatic, atmospheric haze',
-    composition: 'wide cinematic frame, rule of thirds, subject with environmental context, depth layers',
-    atmosphere: 'cinematic color grade, teal and orange palette or monochromatic drama, film grain texture',
-    quality: 'cinema-grade photography, blockbuster quality, no text, no watermarks',
+    style: 'cinematic commercial film campaign, movie poster advertising aesthetic, Hollywood quality',
+    mood: 'dramatic, epic, emotional, powerful storytelling, larger than life',
+    lighting: 'cinematic volumetric rays, golden hour warm side light or cool blue dramatic moonlight, atmospheric haze depth',
+    composition: 'wide cinematic 16:9 feel adapted to square, rule of thirds, subject with dramatic environmental context, layered depth',
+    atmosphere: 'cinematic color grade, teal and orange Hollywood palette or high contrast monochromatic, subtle film grain texture',
+    typography: 'bold cinematic movie poster typeface, large dramatic headline, strong text shadow for readability, epic advertising scale',
+    quality: 'cinema-grade photography render, blockbuster visual quality, ultra detailed, immersive scene',
   },
   minimal: {
-    style: 'minimalist premium advertising, Scandinavian design aesthetic',
-    mood: 'clean, calm, focused, premium simplicity',
-    lighting: 'flat even lighting, minimal shadows, airy and light feel',
-    composition: 'product isolated, massive white space, single focal point, zen balance',
-    atmosphere: 'pure white or cream background, single accent color, refined space',
-    quality: 'minimalist product photography, precision quality, ultra clean, no text, no watermarks',
+    style: 'minimalist premium advertising, Scandinavian design aesthetic, refined simplicity campaign',
+    mood: 'calm, focused, premium through restraint, clarity as luxury',
+    lighting: 'flat even airy lighting, minimal cast shadows, clean ambient light',
+    composition: 'product isolated with massive white breathing space, single focal point, zen compositional balance',
+    atmosphere: 'pure white or warm cream background, single accent color element, refined spatial calm',
+    typography: 'ultra thin light serif or minimal sans-serif, small precise headline, maximum negative space, whitespace as design',
+    quality: 'minimalist product photography precision render, ultra clean flawless quality, editorial restraint',
   },
   aggressive_ads: {
-    style: 'aggressive performance advertising, sports brand campaign style',
-    mood: 'bold, energetic, powerful, in-your-face impact',
-    lighting: 'high contrast dramatic lighting, harsh shadows, neon or electric accents',
-    composition: 'dynamic diagonal composition, extreme angles, explosive energy, motion blur',
-    atmosphere: 'dark gritty background, electric colors, neon accents, urban energy',
-    quality: 'high impact commercial photography, sports brand quality, hyper dynamic, no text, no watermarks',
+    style: 'aggressive performance advertising, Nike and Red Bull campaign energy, sports brand impact',
+    mood: 'explosive, raw power, in-your-face impact, adrenaline, victory',
+    lighting: 'high contrast brutal dramatic lighting, harsh shadows, electric neon accents, energy sparks',
+    composition: 'dynamic diagonal composition, extreme product angle, motion energy, explosive visual force',
+    atmosphere: 'dark gritty urban background, electric colors, neon accent glows, high impact visual chaos controlled',
+    typography: 'massive ultra-bold condensed headline, aggressive impact typeface, bright accent color, maximum visual weight',
+    quality: 'high impact commercial photography render, sports brand quality, hyper dynamic and sharp, advertising energy',
   },
   black_luxury: {
-    style: 'ultra luxury black advertising, supercar and watch brand aesthetic',
-    mood: 'ultra exclusive, dark power, obsidian elegance, status symbol',
-    lighting: 'precision rim lighting, dramatic edge light, deep blacks with controlled highlights',
-    composition: 'subject emerging from darkness, low key dramatic, sculptural form focus',
-    atmosphere: 'pure black background, metallic chrome or gold reflections, invisible luxury',
-    quality: 'ultra premium commercial photography, watchmaker precision quality, no text, no watermarks',
+    style: 'ultra luxury obsidian black advertising, Porsche and Rolex campaign level, invisible luxury premium',
+    mood: 'ultra exclusive, dark seductive power, invisible status, obsidian elegance',
+    lighting: 'precision rim lighting barely visible against black, dramatic edge highlights, deep controlled blacks',
+    composition: 'subject emerging from pure darkness, low key dramatic placement, sculptural form emphasis',
+    atmosphere: 'pure deep black background, chrome or gold metallic reflections, luxurious dark void',
+    typography: 'ultra refined thin tracking-wide serif or premium sans-serif, minimal headline, gold or white text, maximum sophistication',
+    quality: 'ultra premium luxury photography render, watchmaker precision quality, obsidian visual excellence',
   },
 }
 
 const NICHE_BOOSTERS: Record<ZePremiumNiche, string> = {
-  automotivo: 'automotive vehicle prominently featured, dealership professional setting, car brand campaign quality',
-  restaurante: 'appetizing food or restaurant ambiance, culinary photography, warm inviting atmosphere',
-  moda: 'fashion editorial style, clothing or accessories featured, model or lifestyle context',
-  tecnologia: 'technology product clean setup, futuristic digital aesthetic, innovation feel',
-  energia_solar: 'solar energy technology, clean renewable energy visual, modern sustainability',
-  corporativo: 'professional corporate brand, business context, authority and trust visual',
-  ecommerce: 'product packshot premium, e-commerce hero image, clean brand presentation',
-  educacao: 'educational brand visual, knowledge and growth symbolism, modern learning aesthetic',
+  automotivo:    'automotive vehicle as absolute hero subject, dealership professional campaign setting, car brand campaign visual language',
+  restaurante:   'appetizing premium food or restaurant environment, culinary photography level, warm inviting ambiance',
+  moda:          'fashion editorial context, clothing or accessories as hero, model lifestyle visual or product focus',
+  tecnologia:    'technology product in clean premium setup, futuristic digital aesthetic, innovation visual language',
+  energia_solar: 'solar panels or clean energy technology as hero, sustainability modern visual, clean renewable energy branding',
+  corporativo:   'professional corporate brand context, business authority visual, trust and competence aesthetic',
+  ecommerce:     'premium product packshot as hero, e-commerce campaign visual, clean brand presentation',
+  educacao:      'educational brand context, knowledge and growth visual metaphor, modern professional learning aesthetic',
+}
+
+// Instruções de composição tipográfica por estilo
+const TYPOGRAPHY_PLACEMENT: Record<ZePremiumStyle, string> = {
+  automotive_premium: 'place the headline text on the left dark panel area, bottom-left corner for CTA, text must be clearly readable, never overlap the vehicle',
+  premium_dark:       'headline in upper or center-left area on dark background, CTA button at bottom, strong contrast text',
+  luxury:             'headline centered or upper area, elegant spacing, text floats above subject with editorial grace',
+  modern_clean:       'headline right side or bottom on clean background, clean dark text on light area, Apple-style placement',
+  cinematic:          'large headline across bottom third in cinematic title position, CTA below, dramatic text drop shadow',
+  minimal:            'small refined headline centered below product, very little text, maximum white space preserved',
+  aggressive_ads:     'massive diagonal headline across frame, oversized aggressive placement, product and text in dynamic tension',
+  black_luxury:       'minimal headline at bottom in tiny refined text, gold accent on ultra luxury black, whispered not shouted',
 }
 
 export interface ZePremiumPromptInput {
   objective: string
   niche: ZePremiumNiche
   style: ZePremiumStyle
+  headline: string
+  subheadline?: string
   cta?: string
   hasProductImage: boolean
-  hasLogo: boolean
 }
 
 export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
-  const preset = STYLE_PRESETS[input.style] ?? STYLE_PRESETS.premium_dark
-  const nicheBoost = NICHE_BOOSTERS[input.niche] ?? ''
+  const preset      = STYLE_PRESETS[input.style] ?? STYLE_PRESETS.premium_dark
+  const nicheBoost  = NICHE_BOOSTERS[input.niche] ?? ''
+  const typoPlace   = TYPOGRAPHY_PLACEMENT[input.style] ?? ''
 
   const blocks: string[] = []
 
-  // 1. STYLE BLOCK
+  // ── 1. STYLE BLOCK ──────────────────────────────────────────
   blocks.push(preset.style)
 
-  // 2. PRODUCT BLOCK
+  // ── 2. PRODUCT BLOCK ─────────────────────────────────────────
   if (input.hasProductImage) {
-    blocks.push(`product is the absolute hero of the composition, ${nicheBoost}`)
-    blocks.push('preserve product exactly as provided in the reference image, do not alter product colors or shape')
+    blocks.push(`${nicheBoost}, product is the absolute visual hero of the composition`)
+    blocks.push('preserve the product exactly as provided in the reference — do not alter colors, shape or proportions')
   } else {
     blocks.push(nicheBoost)
   }
 
-  // 3. MOOD BLOCK
+  // ── 3. MOOD BLOCK ────────────────────────────────────────────
   blocks.push(preset.mood)
-
-  // 4. COMPOSITION BLOCK
-  blocks.push(preset.composition)
   if (input.objective) {
-    blocks.push(`campaign objective: ${input.objective}`)
+    blocks.push(`campaign message: ${input.objective}`)
   }
 
-  // 5. ATMOSPHERE BLOCK
+  // ── 4. COPY BLOCK — textos renderizados diretamente na imagem ──
+  // O modelo multimodal deve compor e integrar estes textos na arte
+  const copyParts: string[] = []
+
+  copyParts.push(`large bold advertising headline rendered directly in the image saying exactly: "${input.headline}"`)
+
+  if (input.subheadline?.trim()) {
+    copyParts.push(`smaller premium subheadline below saying exactly: "${input.subheadline}"`)
+  }
+
+  if (input.cta?.trim()) {
+    copyParts.push(`modern premium CTA element at the bottom saying exactly: "${input.cta}"`)
+  }
+
+  blocks.push(copyParts.join(', '))
+
+  // ── 5. TYPOGRAPHY BLOCK ───────────────────────────────────────
+  blocks.push(preset.typography)
+  blocks.push(typoPlace)
+  blocks.push('text must be perfectly legible, professional typesetting quality, no handwritten style, no distorted letters')
+
+  // ── 6. COMPOSITION BLOCK ─────────────────────────────────────
+  blocks.push(preset.composition)
+  blocks.push('product and typography coexist without competing — clear visual hierarchy, product is hero, text is supporting')
+
+  // ── 7. ATMOSPHERE BLOCK ───────────────────────────────────────
   blocks.push(preset.atmosphere)
   blocks.push(preset.lighting)
 
-  // 6. CTA AREA BLOCK (reserva espaço visual para texto)
-  if (input.cta) {
-    blocks.push('leave clean dark area for text overlay, do not add any text or letters in the image')
-  }
-
-  // 7. QUALITY BLOCK
+  // ── 8. QUALITY BLOCK ─────────────────────────────────────────
   blocks.push(preset.quality)
-  blocks.push('social media advertising quality, 1:1 square format, professional campaign')
+  blocks.push('complete advertising piece ready for Instagram, professional campaign quality, photorealistic render, no lorem ipsum, no placeholder text')
 
-  return blocks.join(', ')
+  return blocks.join(',\n')
 }
