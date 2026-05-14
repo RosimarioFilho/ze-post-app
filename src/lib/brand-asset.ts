@@ -21,6 +21,7 @@ export interface PreparedLogo {
   buffer: Buffer
   analysis: LogoAnalysis
   mode: LogoMode
+  style: string
 }
 
 export type SharpLayer = { input: Buffer; top: number; left: number; blend: 'over' }
@@ -216,10 +217,14 @@ export function chooseLogoMode(
   style: string,
   emotionalDensity: string | undefined,
 ): LogoMode {
+  // Automotive: ALWAYS BADGE para garantir visibilidade em qualquer fundo
+  if (style.startsWith('AUTOMOTIVE')) return 'BADGE'
+
   // Fundo complexo não removido → BADGE como fallback seguro (pill escura)
   if (analysis.bgType === 'complex') return 'BADGE'
 
   // Estilos premium + densidades suaves → MINIMAL (assinatura discreta)
+  // Exceção: estilos de impacto alto → FLOATING sempre
   if (
     ['LUXURY', 'EDITORIAL', 'MINIMAL'].includes(style) &&
     ['PREMIUM', 'CLEAN', 'MINIMAL', 'SOFT'].includes(emotionalDensity ?? '')
@@ -250,7 +255,7 @@ export async function prepareLogo(
     const cached = await getCachedProcessedLogo(logoUrl, supabase, companyId)
     if (cached) {
       const analysis: LogoAnalysis = { bgType: 'transparent', needsRemoval: false, dominantBg: null }
-      return { buffer: cached, analysis, mode: chooseLogoMode(analysis, style, emotionalDensity) }
+      return { buffer: cached, analysis, mode: chooseLogoMode(analysis, style, emotionalDensity), style }
     }
 
     // 2. Baixa original
@@ -281,7 +286,7 @@ export async function prepareLogo(
         processedBuf = Buffer.from(removed)
         const clearedAnalysis: LogoAnalysis = { bgType: 'transparent', needsRemoval: false, dominantBg: null }
         await cacheProcessedLogo(processedBuf, logoUrl, supabase, companyId)
-        return { buffer: processedBuf, analysis: clearedAnalysis, mode: chooseLogoMode(clearedAnalysis, style, emotionalDensity) }
+        return { buffer: processedBuf, analysis: clearedAnalysis, mode: chooseLogoMode(clearedAnalysis, style, emotionalDensity), style }
       }
     } else if (analysis.bgType === 'transparent') {
       // Já tem transparência → cacheia para próximas gerações
@@ -289,7 +294,7 @@ export async function prepareLogo(
     }
 
     const mode = chooseLogoMode(analysis, style, emotionalDensity)
-    return { buffer: processedBuf, analysis, mode }
+    return { buffer: processedBuf, analysis, mode, style }
   } catch (err) {
     console.warn('[brand-asset] prepareLogo falhou:', err)
     return null
@@ -382,12 +387,18 @@ export async function buildLogoCompositeLayers(
 
     // ── BADGE: pill escura sólida (fallback sem transparência) ───
     case 'BADGE': {
-      const bdPad = Math.round(Math.max(lw, lh) * 0.14)
+      const isAutoStyle = logo.style.startsWith('AUTOMOTIVE')
+      const bdPad = Math.round(Math.max(lw, lh) * 0.12)
       const bdW   = lw + bdPad * 2
       const bdH   = lh + bdPad * 2
-      const bdR   = Math.round(bdH * 0.28)
+      const bdR   = Math.round(bdH * 0.22)
+      const bgOpacity   = isAutoStyle ? 0.70 : 0.55
+      const accentStroke = isAutoStyle
+        ? `<rect width="${bdW}" height="${bdH}" rx="${bdR}" ry="${bdR}" fill="none" stroke="#E30613" stroke-width="2" opacity="0.60"/>`
+        : ''
       const badgeSvg = `<svg width="${bdW}" height="${bdH}" xmlns="http://www.w3.org/2000/svg">
-  <rect width="${bdW}" height="${bdH}" rx="${bdR}" ry="${bdR}" fill="rgba(0,0,0,0.55)"/>
+  <rect width="${bdW}" height="${bdH}" rx="${bdR}" ry="${bdR}" fill="rgba(0,0,0,${bgOpacity})"/>
+  ${accentStroke}
 </svg>`
       const badgeBuf = await sharp(Buffer.from(badgeSvg)).png().toBuffer()
       const bdX = Math.max(0, sx - bdPad)

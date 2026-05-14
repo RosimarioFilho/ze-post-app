@@ -1154,9 +1154,9 @@ function buildDefs(
   // Automotive: painel lateral esquerdo para criar zona de leitura de texto
   if ((style as string).startsWith('AUTOMOTIVE')) {
     defs.push(`<linearGradient id="autoPanelLeft" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%"   stop-color="rgba(0,0,0,0.82)"/>
-      <stop offset="52%"  stop-color="rgba(0,0,0,0.45)"/>
-      <stop offset="78%"  stop-color="rgba(0,0,0,0.10)"/>
+      <stop offset="0%"   stop-color="rgba(0,0,0,0.72)"/>
+      <stop offset="40%"  stop-color="rgba(0,0,0,0.38)"/>
+      <stop offset="62%"  stop-color="rgba(0,0,0,0.08)"/>
       <stop offset="100%" stop-color="transparent"/>
     </linearGradient>`)
   }
@@ -1464,7 +1464,6 @@ function buildAutomotiveTextBlock(opts: {
 
   // Tamanhos proporcionais à largura (referência W=1080)
   const preHLPx    = Math.round(W * 0.022)   // ~24px
-  const hlPx       = Math.round(W * 0.076)   // ~82px
   const descPx     = Math.round(W * 0.019)   // ~20px
   const featPx     = Math.round(W * 0.020)   // ~22px
   const iconSize   = Math.round(W * 0.028)   // ~30px
@@ -1484,6 +1483,19 @@ function buildAutomotiveTextBlock(opts: {
   const rawLines = copy.headline.split(/\\n|\n/).map(l => l.trim()).filter(Boolean)
   const hlWhiteLines = rawLines.length > 1 ? rawLines.slice(0, -1) : []
   const hlAccentLine = rawLines[rawLines.length - 1] ?? ''
+
+  // Zona segura de texto: lado esquerdo (53% da largura)
+  const maxTextW = Math.round(W * 0.53)
+
+  // Font size adaptativo: começa em 0.060 e reduz até que a linha mais longa caiba
+  let hlPx = Math.round(W * 0.060)
+  const allHlLines = [...hlWhiteLines, hlAccentLine].filter(Boolean)
+  for (const line of allHlLines) {
+    const estimatedW = line.length * hlPx * 0.58
+    if (estimatedW > maxTextW) {
+      hlPx = Math.max(Math.round(W * 0.038), Math.round(maxTextW / (line.length * 0.58)))
+    }
+  }
 
   // Subline split em '|': primeiro segmento = descrição; resto = features (máx 3)
   const subParts   = copy.subline.split('|').map(s => s.trim())
@@ -1507,21 +1519,33 @@ function buildAutomotiveTextBlock(opts: {
     y += Math.round(preHLPx * 1.8)
   }
 
-  // 2. Headline linhas brancas
+  // 2. Headline linhas brancas — wrap automático
   const lineH = Math.round(hlPx * 1.08)
-  for (const line of hlWhiteLines) {
-    parts.push(
-      `<text x="${textX}" y="${y + Math.round(hlPx * 0.85)}" font-family="${fontFamily}" font-size="${hlPx}" font-weight="900" fill="rgba(255,255,255,1.0)" letter-spacing="-1" text-anchor="start" style="filter:drop-shadow(2px 4px 8px rgba(0,0,0,0.9))">${esc(line)}</text>`,
-    )
-    y += lineH
+  for (const segment of hlWhiteLines) {
+    const wrapped = wrapText(segment, maxTextW, hlPx)
+    for (const line of wrapped) {
+      const estW = line.length * hlPx * 0.58
+      const tlAttr = estW > maxTextW * 0.92 ? ` textLength="${maxTextW}" lengthAdjust="spacingAndGlyphs"` : ''
+      parts.push(
+        `<text x="${textX}" y="${y + Math.round(hlPx * 0.85)}" font-family="${fontFamily}" font-size="${hlPx}" font-weight="900" fill="rgba(255,255,255,1.0)" letter-spacing="-1" text-anchor="start" style="filter:drop-shadow(2px 4px 8px rgba(0,0,0,0.9))"${tlAttr}>${esc(line)}</text>`,
+      )
+      y += lineH
+    }
   }
 
-  // 3. Headline linha accent (última linha)
+  // 3. Headline linha accent (última linha) — wrap + safety
   if (hlAccentLine) {
-    parts.push(
-      `<text x="${textX}" y="${y + Math.round(hlPx * 0.85)}" font-family="${fontFamily}" font-size="${hlPx}" font-weight="900" fill="${accent}" letter-spacing="-1" text-anchor="start" style="filter:drop-shadow(2px 4px 8px rgba(0,0,0,0.9))">${esc(hlAccentLine)}</text>`,
-    )
-    y += Math.round(lineH * 1.35)
+    const wrappedAccent = wrapText(hlAccentLine, maxTextW, hlPx)
+    for (let i = 0; i < wrappedAccent.length; i++) {
+      const line = wrappedAccent[i]
+      const estW = line.length * hlPx * 0.58
+      const tlAttr = estW > maxTextW * 0.92 ? ` textLength="${maxTextW}" lengthAdjust="spacingAndGlyphs"` : ''
+      const fillColor = i === wrappedAccent.length - 1 ? accent : 'rgba(255,255,255,1.0)'
+      parts.push(
+        `<text x="${textX}" y="${y + Math.round(hlPx * 0.85)}" font-family="${fontFamily}" font-size="${hlPx}" font-weight="900" fill="${fillColor}" letter-spacing="-1" text-anchor="start" style="filter:drop-shadow(2px 4px 8px rgba(0,0,0,0.9))"${tlAttr}>${esc(line)}</text>`,
+      )
+      y += i === wrappedAccent.length - 1 ? Math.round(lineH * 1.35) : lineH
+    }
   }
 
   // 4. Subline descrição
