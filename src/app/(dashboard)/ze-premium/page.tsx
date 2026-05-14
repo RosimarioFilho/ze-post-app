@@ -1,8 +1,10 @@
 'use client'
 
 import { useState, useRef, useCallback } from 'react'
-import { Upload, Sparkles, Download, RefreshCw, X, ImageIcon, Zap, Type } from 'lucide-react'
+import { Upload, Sparkles, Download, RefreshCw, X, ImageIcon, Zap, Type, Monitor, ShieldCheck } from 'lucide-react'
 import type { ZePremiumNiche, ZePremiumStyle } from '@/lib/ze-premium-prompt-builder'
+import { SOCIAL_FORMATS, type SocialFormatId } from '@/lib/social-formats'
+import type { SafeAreaScores } from '@/lib/safe-area-engine'
 
 // ── Opções ────────────────────────────────────────────────────
 
@@ -28,8 +30,11 @@ const STYLES: { value: ZePremiumStyle; label: string; desc: string }[] = [
   { value: 'minimal',            label: 'Minimal',            desc: 'Simplicidade premium Escandinava' },
 ]
 
+const FORMAT_OPTIONS = Object.values(SOCIAL_FORMATS)
+
 const LOADING_MESSAGES = [
   'Inicializando motor visual multimodal...',
+  'Aplicando safe area da plataforma...',
   'Analisando composição do produto...',
   'Integrando headline na arte...',
   'Aplicando estilo tipográfico premium...',
@@ -43,6 +48,9 @@ interface GenerateResult {
   mimeType: string
   provider: string
   prompt: string
+  formatId?: SocialFormatId
+  formatLabel?: string
+  safeAreaScores?: SafeAreaScores
 }
 
 interface UploadedImage {
@@ -61,6 +69,14 @@ function fileToBase64(file: File): Promise<string> {
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
+}
+
+function getAspectClass(formatId: SocialFormatId): string {
+  const f = SOCIAL_FORMATS[formatId]
+  if (!f) return 'aspect-square'
+  if (f.genW === f.genH) return 'aspect-square'
+  if (f.genH > f.genW)   return 'aspect-[9/16]'
+  return 'aspect-video'
 }
 
 // ── Upload Zone ────────────────────────────────────────────────
@@ -128,10 +144,11 @@ function UploadZone({
 
 // ── Loading Card ───────────────────────────────────────────────
 
-function LoadingCard({ msgIndex }: { msgIndex: number }) {
+function LoadingCard({ msgIndex, formatId }: { msgIndex: number; formatId: SocialFormatId }) {
+  const aspectCls = getAspectClass(formatId)
   return (
     <div className="rounded-2xl border border-white/8 bg-white/2 p-6 flex flex-col gap-5">
-      <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-white/4">
+      <div className={`relative w-full ${aspectCls} rounded-xl overflow-hidden bg-white/4`}>
         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/8 to-transparent animate-shimmer" />
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
           <div className="relative">
@@ -147,7 +164,7 @@ function LoadingCard({ msgIndex }: { msgIndex: number }) {
       </div>
       <div className="space-y-2">
         <div className="flex justify-between text-xs text-white/25">
-          <span>Compondo arte com tipografia integrada...</span>
+          <span>Compondo arte com safe area aplicada...</span>
           <span className="animate-pulse">IA Multimodal</span>
         </div>
         <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
@@ -158,27 +175,76 @@ function LoadingCard({ msgIndex }: { msgIndex: number }) {
   )
 }
 
+// ── Safe Area Score Badge ──────────────────────────────────────
+
+function SafeScoreBadge({ scores }: { scores: SafeAreaScores }) {
+  const color =
+    scores.risk_level === 'low'    ? 'text-emerald-400 border-emerald-400/30 bg-emerald-400/8' :
+    scores.risk_level === 'medium' ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/8' :
+                                     'text-red-400 border-red-400/30 bg-red-400/8'
+  const label =
+    scores.risk_level === 'low'    ? 'Safe Area ✓' :
+    scores.risk_level === 'medium' ? 'Safe Area ~' :
+                                     'Safe Area !'
+
+  return (
+    <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold ${color}`}>
+      <ShieldCheck className="w-3 h-3" />
+      {label} {scores.overall}%
+    </div>
+  )
+}
+
 // ── Result Card ────────────────────────────────────────────────
 
 function ResultCard({ result, onRegenerate }: { result: GenerateResult; onRegenerate: () => void }) {
-  const dataUrl = `data:${result.mimeType};base64,${result.imageBase64}`
+  const dataUrl    = `data:${result.mimeType};base64,${result.imageBase64}`
+  const formatId   = result.formatId ?? 'INSTAGRAM_POST'
+  const aspectCls  = getAspectClass(formatId)
 
   function handleDownload() {
     const a = document.createElement('a')
-    a.href = dataUrl; a.download = `ze-premium-${Date.now()}.png`; a.click()
+    a.href = dataUrl; a.download = `ze-premium-${formatId}-${Date.now()}.png`; a.click()
   }
 
   return (
     <div className="rounded-2xl border border-white/8 bg-white/2 overflow-hidden">
-      <div className="relative aspect-square w-full">
+      <div className={`relative ${aspectCls} w-full`}>
         <img src={dataUrl} alt="Arte premium gerada" className="w-full h-full object-cover" />
-        <div className="absolute top-3 right-3">
+        <div className="absolute top-3 right-3 flex flex-col gap-2 items-end">
           <span className="px-2 py-1 bg-black/60 backdrop-blur rounded-lg text-xs text-white/50 border border-white/10">
             {result.provider}
           </span>
+          {result.safeAreaScores && (
+            <SafeScoreBadge scores={result.safeAreaScores} />
+          )}
         </div>
+        {result.formatLabel && (
+          <div className="absolute bottom-3 left-3">
+            <span className="px-2 py-1 bg-black/60 backdrop-blur rounded-lg text-xs text-white/60 border border-white/10">
+              {result.formatLabel}
+            </span>
+          </div>
+        )}
       </div>
       <div className="p-4 flex flex-col gap-3">
+        {result.safeAreaScores && (
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {[
+              { label: 'Headline',    score: result.safeAreaScores.headline_safe_score },
+              { label: 'CTA',         score: result.safeAreaScores.cta_safe_score },
+              { label: 'Logo',        score: result.safeAreaScores.logo_safe_score },
+              { label: 'Tipografia',  score: result.safeAreaScores.typography_margin_score },
+            ].map(({ label, score }) => (
+              <div key={label} className="flex items-center justify-between px-2.5 py-1.5 bg-white/4 rounded-lg">
+                <span className="text-white/40">{label}</span>
+                <span className={score >= 85 ? 'text-emerald-400' : score >= 70 ? 'text-yellow-400' : 'text-red-400'}>
+                  {score}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
         <button onClick={handleDownload}
           className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-semibold text-sm hover:opacity-90 transition-opacity">
           <Download className="w-4 h-4" /> Baixar Arte
@@ -200,6 +266,7 @@ const inputCls = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 
 
 export default function ZePremiumPage() {
   const [productImage, setProductImage] = useState<UploadedImage | null>(null)
+  const [formatId,     setFormatId]     = useState<SocialFormatId>('INSTAGRAM_POST')
   const [niche,        setNiche]        = useState<ZePremiumNiche>('automotivo')
   const [style,        setStyle]        = useState<ZePremiumStyle>('automotive_premium')
 
@@ -232,6 +299,7 @@ export default function ZePremiumPage() {
           objective:          objective.trim() || headline,
           niche,
           style,
+          formatId,
           headline:           headline.trim(),
           subheadline:        subheadline.trim() || undefined,
           cta:                cta.trim() || undefined,
@@ -250,7 +318,8 @@ export default function ZePremiumPage() {
     }
   }
 
-  const canGenerate = !loading && !!headline.trim()
+  const canGenerate  = !loading && !!headline.trim()
+  const currentFmt   = SOCIAL_FORMATS[formatId]
 
   return (
     <div className="min-h-screen bg-[#080810] text-white">
@@ -266,14 +335,14 @@ export default function ZePremiumPage() {
         <div className="mb-10 text-center">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-300 text-xs font-semibold mb-5">
             <Zap className="w-3.5 h-3.5" />
-            Multimodal AI — Tipografia Integrada
+            Multimodal AI — Safe Area System
           </div>
           <h1 className="text-4xl font-black tracking-tight">
             <span className="text-white">Zé </span>
             <span className="bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">Premium</span>
           </h1>
           <p className="mt-2 text-white/35 text-sm max-w-lg mx-auto">
-            O modelo gera headline, subheadline e CTA diretamente na arte — sem overlay, sem canvas, composição integrada.
+            Gera headline, subheadline e CTA diretamente na arte — com safe area oficial de cada plataforma.
           </p>
         </div>
 
@@ -281,6 +350,36 @@ export default function ZePremiumPage() {
 
           {/* ── Formulário ── */}
           <div className="space-y-4">
+
+            {/* Formato da Arte */}
+            <div className="rounded-2xl border border-white/8 bg-white/2 p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Monitor className="w-4 h-4 text-violet-400" />
+                <h2 className="text-sm font-semibold text-white/70">Formato da Arte</h2>
+                <span className="ml-auto text-xs font-medium text-violet-400/70">
+                  {currentFmt.officialW}×{currentFmt.officialH}
+                </span>
+              </div>
+              <select
+                value={formatId}
+                onChange={e => setFormatId(e.target.value as SocialFormatId)}
+                className={inputCls + ' cursor-pointer'}
+              >
+                {FORMAT_OPTIONS.map(f => (
+                  <option key={f.id} value={f.id} style={{ background: '#0f0f1a' }}>
+                    {f.label} — {f.aspectRatio}
+                  </option>
+                ))}
+              </select>
+              {currentFmt.dangerZoneIds.length > 0 && (
+                <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-500/8 border border-amber-500/20 rounded-xl">
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-300/70">
+                    Safe area ativa — {currentFmt.dangerZoneIds.length} zona{currentFmt.dangerZoneIds.length > 1 ? 's' : ''} de perigo da {currentFmt.platform} serão respeitadas automaticamente.
+                  </p>
+                </div>
+              )}
+            </div>
 
             {/* Upload */}
             <div className="rounded-2xl border border-white/8 bg-white/2 p-5 space-y-3">
@@ -343,7 +442,7 @@ export default function ZePremiumPage() {
                 <h2 className="text-sm font-semibold text-white/70">Copy — tipografia integrada na arte</h2>
               </div>
               <p className="text-xs text-white/30 -mt-1">
-                Os textos abaixo serão renderizados diretamente pelo modelo de IA dentro da imagem.
+                Os textos abaixo serão renderizados diretamente pelo modelo de IA dentro da imagem, respeitando a safe area do formato selecionado.
               </p>
 
               <div>
@@ -409,25 +508,25 @@ export default function ZePremiumPage() {
               ].join(' ')}
             >
               <Sparkles className={['w-5 h-5', loading ? 'animate-spin' : ''].join(' ')} />
-              {loading ? 'Gerando arte com tipografia integrada...' : 'Gerar Arte Premium'}
+              {loading ? 'Gerando arte com safe area...' : 'Gerar Arte Premium'}
             </button>
           </div>
 
           {/* ── Resultado ── */}
           <div className="lg:sticky lg:top-6">
             {loading ? (
-              <LoadingCard msgIndex={msgIndex} />
+              <LoadingCard msgIndex={msgIndex} formatId={formatId} />
             ) : result ? (
               <ResultCard result={result} onRegenerate={handleGenerate} />
             ) : (
-              <div className="rounded-2xl border border-white/6 bg-white/2 aspect-square flex flex-col items-center justify-center gap-4 text-center p-8">
+              <div className={`rounded-2xl border border-white/6 bg-white/2 ${getAspectClass(formatId)} flex flex-col items-center justify-center gap-4 text-center p-8`}>
                 <div className="w-16 h-16 rounded-2xl bg-white/4 flex items-center justify-center">
                   <Sparkles className="w-8 h-8 text-white/15" />
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-white/25">Sua arte premium</p>
                   <p className="text-xs text-white/12 mt-1">
-                    Preencha headline, nicho e estilo<br />e clique em Gerar Arte Premium
+                    Escolha o formato, preencha headline<br />e clique em Gerar Arte Premium
                   </p>
                 </div>
               </div>

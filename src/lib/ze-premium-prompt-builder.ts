@@ -3,6 +3,9 @@
 // subheadline e CTA diretamente dentro da imagem gerada.
 // Sem overlay, sem HTML, sem composição posterior.
 
+import type { SocialFormat } from './social-formats'
+import { buildSafeAreaGuidance } from './safe-area-engine'
+
 export type ZePremiumNiche =
   | 'automotivo'
   | 'restaurante'
@@ -139,6 +142,7 @@ export interface ZePremiumPromptInput {
   subheadline?: string
   cta?: string
   hasProductImage: boolean
+  format?: SocialFormat   // formato da mídia — define safe area e dimensões
 }
 
 export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
@@ -147,6 +151,13 @@ export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
   const typoPlace   = TYPOGRAPHY_PLACEMENT[input.style] ?? ''
 
   const blocks: string[] = []
+
+  // ── 0. FORMAT + SAFE AREA BLOCK ──────────────────────────────
+  // Deve ser o primeiro bloco para que o modelo entenda o contexto
+  // de plataforma antes de decidir qualquer composição tipográfica
+  if (input.format) {
+    blocks.push(buildSafeAreaGuidance(input.format))
+  }
 
   // ── 1. STYLE BLOCK ──────────────────────────────────────────
   blocks.push(preset.style)
@@ -196,7 +207,12 @@ export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
 
   // ── 8. QUALITY BLOCK ─────────────────────────────────────────
   blocks.push(preset.quality)
-  blocks.push('complete advertising piece ready for Instagram, professional campaign quality, photorealistic render, no lorem ipsum, no placeholder text')
+  const platformLabel = input.format?.label ?? 'Instagram'
+  blocks.push(
+    `complete advertising piece ready for ${platformLabel}, ` +
+    'professional campaign quality, photorealistic render, no lorem ipsum, no placeholder text, ' +
+    'all text elements fully within safe composition area'
+  )
 
   return blocks.join(',\n')
 }

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { buildZePremiumPrompt, type ZePremiumNiche, type ZePremiumStyle } from '@/lib/ze-premium-prompt-builder'
+import { SOCIAL_FORMATS, type SocialFormatId } from '@/lib/social-formats'
+import { computeSafeAreaScores } from '@/lib/safe-area-engine'
 import { generateImage } from '@/lib/imageProvider'
 
 export const maxDuration = 120
@@ -13,15 +15,24 @@ export async function POST(req: NextRequest) {
       headline: string
       subheadline?: string
       cta?: string
+      formatId?: SocialFormatId
       productImageBase64?: string
       productImageMime?: string
     }
 
-    const { objective, niche, style, headline, subheadline, cta, productImageBase64, productImageMime } = body
+    const {
+      objective, niche, style, headline, subheadline, cta,
+      formatId, productImageBase64, productImageMime,
+    } = body
 
     if (!headline?.trim()) {
       return NextResponse.json({ error: 'Headline é obrigatória' }, { status: 400 })
     }
+
+    // Formato da mídia — padrão: Instagram Post (1:1)
+    const format = (formatId && SOCIAL_FORMATS[formatId])
+      ? SOCIAL_FORMATS[formatId]
+      : SOCIAL_FORMATS.INSTAGRAM_POST
 
     const prompt = buildZePremiumPrompt({
       objective: objective ?? '',
@@ -31,26 +42,37 @@ export async function POST(req: NextRequest) {
       subheadline,
       cta,
       hasProductImage: !!productImageBase64,
+      format,
     })
 
-    console.log(`[ze-premium] Gerando arte — niche=${niche} style=${style} headline="${headline}" hasProduct=${!!productImageBase64}`)
-    console.log(`[ze-premium] Prompt: ${prompt.slice(0, 200)}...`)
+    console.log(
+      `[ze-premium] Gerando arte — format=${format.id} niche=${niche} style=${style} ` +
+      `headline="${headline}" hasProduct=${!!productImageBase64} ` +
+      `genSize=${format.genW}x${format.genH}`
+    )
+    console.log(`[ze-premium] Prompt: ${prompt.slice(0, 250)}...`)
 
     const result = await generateImage(
       prompt,
-      'post_instagram',   // square 1:1
-      1024, 1024,
+      'post_instagram',
+      format.genW,
+      format.genH,
       productImageBase64,
       productImageMime as 'image/jpeg' | 'image/png' | 'image/webp' | undefined,
     )
 
-    console.log(`[ze-premium] Arte gerada via ${result.provider}`)
+    console.log(`[ze-premium] Arte gerada via ${result.provider} (${format.genW}×${format.genH})`)
+
+    const safeAreaScores = computeSafeAreaScores(format)
 
     return NextResponse.json({
       imageBase64: result.base64,
       mimeType: result.mimeType,
       provider: result.provider,
       prompt,
+      formatId: format.id,
+      formatLabel: format.label,
+      safeAreaScores,
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
