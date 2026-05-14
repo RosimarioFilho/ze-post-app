@@ -19,6 +19,9 @@ export type Layout =
 export type VisualStyle =
   | 'CINEMATIC' | 'LUXURY' | 'SPORT' | 'TECH'
   | 'MINIMAL' | 'NEON' | 'CORPORATE' | 'EDITORIAL' | 'STREET'
+  // ── Automotive Composition Mode — estilos premium para veículos ──
+  | 'AUTOMOTIVE_PREMIUM' | 'AUTOMOTIVE_OFFER' | 'AUTOMOTIVE_LUXURY'
+  | 'AUTOMOTIVE_URBAN'   | 'AUTOMOTIVE_CLEAN' | 'AUTOMOTIVE_SPORT'
 
 export type Effect = 'EMBERS' | 'DUST' | 'LIGHT_LEAK' | 'GLOW' | 'GRAIN' | 'SMOKE'
 
@@ -196,6 +199,81 @@ export const STYLE_TOKENS: Record<VisualStyle, StyleTokens> = {
     cameraFeel: 'street photography style, reportage, authentic documentary feel',
     imagePromptSuffix: 'urban street photography, raw authentic energy, gritty atmosphere, documentary style, real people',
   },
+
+  // ════════════════════════════════════════════════════════════════
+  // AUTOMOTIVE COMPOSITION MODE — Motor premium para veículos
+  // Regra crítica: gradientCoverage 22-30 (apenas faixa de texto)
+  //                overlayAlpha: 0 (NUNCA overlay sobre o veículo)
+  //                atmosphericHaze: false (não obscurece o produto)
+  // ════════════════════════════════════════════════════════════════
+
+  AUTOMOTIVE_PREMIUM: {
+    // gradientCoverage: 26 → apenas bottom 26% escurecido (faixa de texto)
+    // overlayAlpha: 0 → veículo NUNCA coberto por overlay sólido
+    gradientAlpha: 0.92, gradientCoverage: 26, overlayAlpha: 0.0, textShadow: true, accentOpacity: 1.0,
+    vignette: true, vignetteIntensity: 0.18, atmosphericHaze: false, grainIntensity: 0.03, glowIntensity: 0.08,
+    headlineCase: 'upper', headlineOpacity: 1.0, sublineOpacity: 0.90, ctaStyle: 'filled',
+    spacingMode: 'balanced',
+    contrast: 'high', saturation: 'rich',
+    lightingDesc: 'dramatic automotive studio lighting, rim lighting on vehicle body panels, clean floor reflection, seamless background',
+    cameraFeel: 'premium automotive ad photography, wide angle low hero shot, 3/4 front view',
+    imagePromptSuffix: 'premium automotive advertising photography, VEHICLE AS DOMINANT HERO filling 70% of frame, clean seamless background contrasting with vehicle, dramatic rim lighting on body, subtle floor reflection, bottom 26% clear dark area for text — no text no watermarks',
+  },
+
+  AUTOMOTIVE_OFFER: {
+    gradientAlpha: 0.94, gradientCoverage: 30, overlayAlpha: 0.0, textShadow: true, accentOpacity: 1.0,
+    vignette: true, vignetteIntensity: 0.22, atmosphericHaze: false, grainIntensity: 0.02, glowIntensity: 0.05,
+    headlineCase: 'upper', headlineOpacity: 1.0, sublineOpacity: 0.90, ctaStyle: 'filled',
+    spacingMode: 'compact',
+    contrast: 'high', saturation: 'vivid',
+    lightingDesc: 'bright premium dealership lighting, vehicle in full clean detail, high contrast commercial photography',
+    cameraFeel: 'clean commercial ad photography, vehicle sharp and prominent',
+    imagePromptSuffix: 'premium dealer advertising photography, vehicle prominent and clear, bright background contrasting vehicle color, bottom 30% dark gradient for price/offer text, no text no watermarks',
+  },
+
+  AUTOMOTIVE_LUXURY: {
+    gradientAlpha: 0.88, gradientCoverage: 22, overlayAlpha: 0.0, textShadow: false, accentOpacity: 0.90,
+    vignette: false, vignetteIntensity: 0, atmosphericHaze: false, grainIntensity: 0, glowIntensity: 0.0,
+    headlineCase: 'title', headlineOpacity: 1.0, sublineOpacity: 0.82, ctaStyle: 'outline',
+    spacingMode: 'generous',
+    contrast: 'medium', saturation: 'muted',
+    lightingDesc: 'premium studio luxury automotive photography, soft elegant background, refined lighting',
+    cameraFeel: 'medium format luxury automotive, sophisticated composition',
+    imagePromptSuffix: 'luxury automotive photography, elegance and sophistication, clean minimal background, premium brand aesthetic, generous negative space, vehicle as art piece, bottom 22% slightly darker for text, no text no watermarks',
+  },
+
+  AUTOMOTIVE_URBAN: {
+    gradientAlpha: 0.90, gradientCoverage: 28, overlayAlpha: 0.0, textShadow: true, accentOpacity: 1.0,
+    vignette: true, vignetteIntensity: 0.28, atmosphericHaze: false, grainIntensity: 0.06, glowIntensity: 0.12,
+    headlineCase: 'upper', headlineOpacity: 1.0, sublineOpacity: 0.88, ctaStyle: 'filled',
+    spacingMode: 'balanced',
+    contrast: 'high', saturation: 'rich',
+    lightingDesc: 'urban dramatic lighting, city context, vehicle in street environment, night or dusk atmosphere',
+    cameraFeel: 'urban automotive photography, dynamic street context',
+    imagePromptSuffix: 'urban automotive advertising, vehicle in dramatic city context, vehicle as hero, bottom 28% dark for text overlay, no text no watermarks',
+  },
+
+  AUTOMOTIVE_CLEAN: {
+    gradientAlpha: 0.90, gradientCoverage: 24, overlayAlpha: 0.0, textShadow: false, accentOpacity: 0.95,
+    vignette: false, vignetteIntensity: 0, atmosphericHaze: false, grainIntensity: 0, glowIntensity: 0.0,
+    headlineCase: 'upper', headlineOpacity: 1.0, sublineOpacity: 0.88, ctaStyle: 'filled',
+    spacingMode: 'balanced',
+    contrast: 'medium', saturation: 'natural',
+    lightingDesc: 'clean white studio automotive photography, pure seamless background, even illumination',
+    cameraFeel: 'clean product automotive shot, bright and modern',
+    imagePromptSuffix: 'clean studio background automotive photography, vehicle isolated on clean background, minimal aesthetic, bottom 24% slightly darker for text, no text no watermarks',
+  },
+
+  AUTOMOTIVE_SPORT: {
+    gradientAlpha: 0.95, gradientCoverage: 28, overlayAlpha: 0.0, textShadow: true, accentOpacity: 1.0,
+    vignette: true, vignetteIntensity: 0.30, atmosphericHaze: false, grainIntensity: 0.04, glowIntensity: 0.20,
+    headlineCase: 'upper', headlineOpacity: 1.0, sublineOpacity: 0.90, ctaStyle: 'filled',
+    spacingMode: 'compact',
+    contrast: 'ultra', saturation: 'vivid',
+    lightingDesc: 'dramatic sport automotive lighting, high contrast, speed and power energy, rim light',
+    cameraFeel: 'dynamic low angle sport automotive shot, dramatic perspective',
+    imagePromptSuffix: 'sport automotive advertising, high performance vehicle, dramatic cinematic lighting, dark cinematic background contrasting vehicle, bottom 28% dark area for text, no text no watermarks',
+  },
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -302,13 +380,13 @@ export const NICHE_SUBJECT_PROFILES: Record<string, SubjectProfile> = {
   },
   concessionaria: {
     category: 'VEHICLE',
-    pose: 'hero angle — 3/4 front view or dramatic low angle, showing full vehicle profile',
-    expression: 'power, elegance and performance communicated through vehicle design',
-    lighting: 'cinematic warm-golden or cool premium studio light, chrome reflections, dramatic shadows',
-    cameraAngle: 'low angle looking up, wide angle to emphasize size and power',
-    backgroundTreatment: 'dark studio or dramatic outdoor scene, atmospheric depth, subtle smoke or dust',
+    pose: 'hero 3/4 front angle — vehicle dominates 70% of frame, low angle looking up at vehicle',
+    expression: 'power, status and performance communicated through vehicle design and reflections',
+    lighting: 'dramatic rim lighting on body panels, subtle floor reflection, background contrasts with vehicle color',
+    cameraAngle: 'low angle hero shot looking up, wide angle to emphasize scale. Vehicle body clean and bright — NO dark overlay over vehicle.',
+    backgroundTreatment: 'CONTRASTING background (if white vehicle: dark bg; if dark vehicle: light or gradient bg). Bottom 26% only gets dark gradient for text.',
     energyLevel: 'high',
-    forbiddenElements: 'flat side view, boring lot background, generic dealership photo',
+    forbiddenElements: 'flat boring side view, generic lot background, dark gradient covering vehicle body, overlay over vehicle, fog or haze on vehicle',
   },
   offroad: {
     category: 'VEHICLE',
@@ -404,8 +482,8 @@ export const NICHE_DEFAULTS: Record<string, Partial<CreativeDecision>> = {
   infantil:       { layout: 'POSTER',        style: 'MINIMAL',   effects: [],              typography: 'BOLD_IMPACT', depth: 'LOW'   },
   politica:       { layout: 'POSTER',        style: 'CORPORATE', effects: [],              typography: 'BOLD_IMPACT', depth: 'MEDIUM' },
   moda:           { layout: 'ASYMMETRIC',    style: 'EDITORIAL', effects: ['GRAIN'],       typography: 'ELEGANT',    depth: 'MEDIUM' },
-  offroad:        { layout: 'DIAGONAL_FLOW', style: 'CINEMATIC', effects: ['GRAIN'],       typography: 'CONDENSED',  depth: 'HIGH'   },
-  concessionaria: { layout: 'HERO_RIGHT',    style: 'CINEMATIC', effects: ['LIGHT_LEAK'],  typography: 'BOLD_IMPACT', depth: 'HIGH'  },
+  offroad:        { layout: 'DIAGONAL_FLOW', style: 'AUTOMOTIVE_SPORT',   effects: [],              typography: 'CONDENSED',  depth: 'HIGH'   },
+  concessionaria: { layout: 'HERO_RIGHT',    style: 'AUTOMOTIVE_PREMIUM', effects: [],              typography: 'BOLD_IMPACT', depth: 'HIGH'  },
   servicos:       { layout: 'SPLIT_SCREEN',  style: 'CORPORATE', effects: [],              typography: 'STACKED',    depth: 'MEDIUM' },
 }
 
@@ -622,7 +700,7 @@ export const NICHE_CREATIVE_DEFAULTS_V3: Record<string, {
   politica:       { eye_flow: 'FACE_TO_HEADLINE',  emotional_density: 'CORPORATE',  camera_type: 'CENTER_HERO'         },
   moda:           { eye_flow: 'DIAGONAL_RIGHT',    emotional_density: 'DRAMATIC',   camera_type: 'MAGAZINE_SHOT'       },
   offroad:        { eye_flow: 'DIAGONAL_RIGHT',    emotional_density: 'AGGRESSIVE', camera_type: 'LOW_ANGLE'           },
-  concessionaria: { eye_flow: 'HERO_TO_CTA',       emotional_density: 'CINEMATIC',  camera_type: 'LOW_ANGLE'           },
+  concessionaria: { eye_flow: 'HERO_TO_CTA',       emotional_density: 'PREMIUM',    camera_type: 'LOW_ANGLE'           },
   servicos:       { eye_flow: 'Z_PATTERN',         emotional_density: 'CORPORATE',  camera_type: 'CENTER_HERO'         },
 }
 
@@ -683,6 +761,23 @@ const INCOHERENCE_RULES: CoherenceRule[] = [
     condition: d => d.layout === 'POSTER' && d.typography === 'FLOATING',
     penalty: 12, reason: 'POSTER não combina com FLOATING',
     apply: () => ({ typography: 'BOLD_IMPACT' as TypographyBehavior }),
+  },
+  // ── Automotive: emotional density AGGRESSIVE/DRAMATIC multiplica overlayAlpha
+  //    (0.0 × multiplier = ainda 0, ok) mas multiplica gradientAlpha demais
+  {
+    condition: d => (d.style as string).startsWith('AUTOMOTIVE') && d.emotional_density === 'AGGRESSIVE',
+    penalty: 18, reason: 'AUTOMOTIVE + AGGRESSIVE escurece demasiado o veículo — trocar por PREMIUM',
+    apply: () => ({ emotional_density: 'PREMIUM' as EmotionalToken }),
+  },
+  {
+    condition: d => (d.style as string).startsWith('AUTOMOTIVE') && d.emotional_density === 'DRAMATIC',
+    penalty: 20, reason: 'AUTOMOTIVE + DRAMATIC = vignette máxima sobre veículo — trocar por CINEMATIC',
+    apply: () => ({ emotional_density: 'CINEMATIC' as EmotionalToken }),
+  },
+  {
+    condition: d => (d.style as string).startsWith('AUTOMOTIVE') && d.effects.length > 0,
+    penalty: 12, reason: 'AUTOMOTIVE não usa efeitos sobrepostos (GRAIN/GLOW obscurece veículo)',
+    apply: () => ({ effects: [] as Effect[] }),
   },
 ]
 
@@ -972,6 +1067,7 @@ function applyCase(text: string, headlineCase: 'upper' | 'title'): string {
 // ── Layer 0: SVG Defs (gradients, filters) ────────────────────────
 function buildDefs(
   layout: Layout,
+  style: VisualStyle,
   tokens: StyleTokens,
   effects: Effect[],
   palette: Record<string, string>,
@@ -1055,6 +1151,16 @@ function buildDefs(
     <stop offset="100%" stop-color="${accent}" stop-opacity="0"/>
   </linearGradient>`)
 
+  // Automotive: painel lateral esquerdo para criar zona de leitura de texto
+  if ((style as string).startsWith('AUTOMOTIVE')) {
+    defs.push(`<linearGradient id="autoPanelLeft" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="rgba(0,0,0,0.82)"/>
+      <stop offset="52%"  stop-color="rgba(0,0,0,0.45)"/>
+      <stop offset="78%"  stop-color="rgba(0,0,0,0.10)"/>
+      <stop offset="100%" stop-color="transparent"/>
+    </linearGradient>`)
+  }
+
   return `<defs>\n${defs.join('\n')}\n</defs>`
 }
 
@@ -1128,6 +1234,19 @@ function buildBackgroundLayers(
     layers.push(`<rect x="${safeH}" y="${lineY}" width="${Math.round(W * 0.32)}" height="3" fill="url(#accentFade)"/>`)
   }
 
+  // Automotive: painel lateral esquerdo + linhas diagonais accent
+  if ((style as string).startsWith('AUTOMOTIVE')) {
+    const autoAccent = palette.primary ?? palette.accent ?? '#E30613'
+    // Painel lateral que cria zona escura para o texto à esquerda
+    layers.push(`<rect width="${W}" height="${H}" fill="url(#autoPanelLeft)"/>`)
+    // 3 linhas diagonais premium no canto inferior direito
+    layers.push(
+      `<rect x="${Math.round(W * 0.28)}" y="${Math.round(H * 0.70)}" width="${Math.round(W * 0.90)}" height="5" fill="${autoAccent}" opacity="0.90" transform="rotate(-8,${Math.round(W * 0.73)},${Math.round(H * 0.73)})"/>`,
+      `<rect x="${Math.round(W * 0.38)}" y="${Math.round(H * 0.76)}" width="${Math.round(W * 0.78)}" height="3" fill="${autoAccent}" opacity="0.55" transform="rotate(-8,${Math.round(W * 0.73)},${Math.round(H * 0.78)})"/>`,
+      `<rect x="${Math.round(W * 0.20)}" y="${Math.round(H * 0.65)}" width="${Math.round(W * 0.65)}" height="2" fill="${autoAccent}" opacity="0.35" transform="rotate(-8,${Math.round(W * 0.50)},${Math.round(H * 0.66)})"/>`,
+    )
+  }
+
   return layers.join('\n')
 }
 
@@ -1171,17 +1290,17 @@ export function buildTextBlock(opts: TextBlockOptions): string {
   const isFocusTop = layout === 'FOCUS_CENTER'
 
   const textAnchor = isCentered ? 'middle' : isRight ? 'end' : 'start'
-  const maxTextW   = isSplit ? Math.round(W * 0.42) : W - safeH * 2
+  const maxTextW   = isSplit ? Math.round(W * 0.42) : W - safeH * 2 - Math.round(W * 0.04)
   const textX      = isCentered ? Math.round(W / 2)
                    : isRight    ? W - safeH
                    : isSplit    ? Math.round(W * 0.44)
                    : safeH
 
   // ── ADAPTIVE HEADLINE SYSTEM ──────────────────────────────────
-  // charWidth conservador: 0.62 para evitar overflow
-  // UPPER CASE letras: mais largas; usa 0.63 para uppercase
+  // charWidth real: Arial Black 900 uppercase ≈ 0.78em; mixed ≈ 0.64em
+  // Valor ALTO = quebra mais cedo = evita overflow no clipPath
   const headlineText    = applyCase(copy.headline, tokens.headlineCase)
-  const CW_HEADLINE     = tokens.headlineCase === 'upper' ? 0.63 : 0.60
+  const CW_HEADLINE     = tokens.headlineCase === 'upper' ? 0.78 : 0.64
   const targetMaxLines  = layout === 'POSTER' ? 2 : 3
   const minHeadlinePx   = Math.round(baseHPx * 0.62)  // piso: 62% do original
 
@@ -1272,11 +1391,14 @@ export function buildTextBlock(opts: TextBlockOptions): string {
     : ''
 
   for (const line of headlineLines) {
+    // Garante que a linha caiba no clipPath — Arial Black ~0.82em/char uppercase
+    const estW = line.length * headlinePx * 0.82
+    const tlAttr = estW > maxTextW * 0.92 ? ` textLength="${maxTextW}" lengthAdjust="spacingAndGlyphs"` : ''
     parts.push(
       `<text x="${textX}" y="${y + Math.round(headlinePx * 0.82)}"` +
       ` font-family="${fontFamily}" font-size="${headlinePx}" font-weight="900"` +
       ` fill="rgba(255,255,255,${tokens.headlineOpacity})" letter-spacing="${tp.letterSpacing}"` +
-      ` text-anchor="${textAnchor}"${glowAttr}${shadowStyle}>${esc(line)}</text>`
+      ` text-anchor="${textAnchor}"${glowAttr}${shadowStyle}${tlAttr}>${esc(line)}</text>`
     )
     y += headLineH
   }
@@ -1328,9 +1450,116 @@ function buildClipPath(W: number, H: number, safeH: number, safeTop: number, saf
 }
 
 // ── Main SVG builder ──────────────────────────────────────────────
+// ── Automotive Premium: compositor especializado de texto ─────────
+function buildAutomotiveTextBlock(opts: {
+  copy: { headline: string; subline: string; cta: string; preHeadline?: string }
+  palette: Record<string, string>
+  fontFamily: string
+  W: number
+  H: number
+  safeH: number
+}): string {
+  const { copy, palette, fontFamily, W, H, safeH } = opts
+  const accent = palette.primary ?? palette.accent ?? '#E30613'
+
+  // Tamanhos proporcionais à largura (referência W=1080)
+  const preHLPx    = Math.round(W * 0.022)   // ~24px
+  const hlPx       = Math.round(W * 0.076)   // ~82px
+  const descPx     = Math.round(W * 0.019)   // ~20px
+  const featPx     = Math.round(W * 0.020)   // ~22px
+  const iconSize   = Math.round(W * 0.028)   // ~30px
+  const ctaBarH    = Math.round(H * 0.095)   // ~102px
+  const ctaInnerH  = Math.round(ctaBarH * 0.58)
+  const ctaBarY    = H - ctaBarH
+  const ctaPx      = Math.round(W * 0.026)   // ~28px
+  const ctaLblPx   = Math.round(W * 0.013)   // ~14px
+
+  const textX = safeH
+
+  // Pre-headline (modelo/ano)
+  const preHL = (copy.preHeadline ?? '').toUpperCase().trim()
+
+  // Headline split: tudo antes da última linha = branco; última linha = accent
+  // Aceita tanto newline real (\n) quanto literal escapado (\\n) que o AI às vezes retorna
+  const rawLines = copy.headline.split(/\\n|\n/).map(l => l.trim()).filter(Boolean)
+  const hlWhiteLines = rawLines.length > 1 ? rawLines.slice(0, -1) : []
+  const hlAccentLine = rawLines[rawLines.length - 1] ?? ''
+
+  // Subline split em '|': primeiro segmento = descrição; resto = features (máx 3)
+  const subParts   = copy.subline.split('|').map(s => s.trim())
+  const subDesc    = subParts[0] ?? ''
+  const features   = subParts.slice(1, 4)
+
+  // CTA split: primeira linha = rótulo; última = número/ação
+  const ctaParts  = copy.cta.split(/\\n|\n/)
+  const ctaLabel  = ctaParts.length > 1 ? ctaParts[0].toUpperCase() : 'FALE COM A NOSSA EQUIPE'
+  const ctaNumber = ctaParts[ctaParts.length - 1]
+
+  const parts: string[] = []
+  let y = Math.round(H * 0.14)   // âncora vertical inicial: 14% do topo
+
+  // 1. Pre-headline label
+  if (preHL) {
+    parts.push(
+      `<text x="${textX}" y="${y}" font-family="${fontFamily}" font-size="${preHLPx}" font-weight="700" fill="${accent}" letter-spacing="3" text-anchor="start">${esc(preHL)}</text>`,
+      `<rect x="${textX}" y="${y + 8}" width="${Math.round(W * 0.10)}" height="2" fill="${accent}" opacity="0.70"/>`,
+    )
+    y += Math.round(preHLPx * 1.8)
+  }
+
+  // 2. Headline linhas brancas
+  const lineH = Math.round(hlPx * 1.08)
+  for (const line of hlWhiteLines) {
+    parts.push(
+      `<text x="${textX}" y="${y + Math.round(hlPx * 0.85)}" font-family="${fontFamily}" font-size="${hlPx}" font-weight="900" fill="rgba(255,255,255,1.0)" letter-spacing="-1" text-anchor="start" style="filter:drop-shadow(2px 4px 8px rgba(0,0,0,0.9))">${esc(line)}</text>`,
+    )
+    y += lineH
+  }
+
+  // 3. Headline linha accent (última linha)
+  if (hlAccentLine) {
+    parts.push(
+      `<text x="${textX}" y="${y + Math.round(hlPx * 0.85)}" font-family="${fontFamily}" font-size="${hlPx}" font-weight="900" fill="${accent}" letter-spacing="-1" text-anchor="start" style="filter:drop-shadow(2px 4px 8px rgba(0,0,0,0.9))">${esc(hlAccentLine)}</text>`,
+    )
+    y += Math.round(lineH * 1.35)
+  }
+
+  // 4. Subline descrição
+  if (subDesc) {
+    parts.push(
+      `<text x="${textX}" y="${y}" font-family="${fontFamily}" font-size="${descPx}" font-weight="400" fill="rgba(255,255,255,0.75)" text-anchor="start">${esc(subDesc)}</text>`,
+    )
+    y += Math.round(descPx * 2.2)
+  }
+
+  // 5. Lista de features com ícones
+  const featLineH = Math.round(iconSize * 1.55)
+  for (const feat of features) {
+    const iconY = y - Math.round(iconSize * 0.80)
+    parts.push(
+      `<rect x="${textX}" y="${iconY}" width="${iconSize}" height="${iconSize}" rx="4" fill="${accent}" opacity="0.18"/>`,
+      `<rect x="${textX}" y="${iconY}" width="${iconSize}" height="${iconSize}" rx="4" fill="none" stroke="${accent}" stroke-width="1.5" opacity="0.80"/>`,
+      `<text x="${textX + iconSize + 10}" y="${y}" font-family="${fontFamily}" font-size="${featPx}" font-weight="600" fill="rgba(255,255,255,0.90)" text-anchor="start">${esc(feat.toUpperCase())}</text>`,
+    )
+    y += featLineH
+  }
+
+  // 6. Barra CTA premium — full-width, ancorada no rodapé
+  const ctaBtnY = ctaBarY + Math.round((ctaBarH - ctaInnerH) / 2)
+  parts.push(
+    `<rect x="0" y="${ctaBarY}" width="${W}" height="${ctaBarH}" fill="rgba(0,0,0,0.82)"/>`,
+    `<rect x="0" y="${ctaBarY}" width="${W}" height="3" fill="${accent}" opacity="0.95"/>`,
+    `<rect x="${safeH}" y="${ctaBtnY}" width="${W - safeH * 2}" height="${ctaInnerH}" rx="${Math.round(ctaInnerH * 0.45)}" fill="${accent}"/>`,
+    `<text x="${Math.round(W / 2)}" y="${ctaBtnY - 6}" font-family="${fontFamily}" font-size="${ctaLblPx}" font-weight="400" fill="rgba(255,255,255,0.60)" letter-spacing="3" text-anchor="middle">${esc(ctaLabel)}</text>`,
+    `<text x="${Math.round(W / 2)}" y="${ctaBtnY + Math.round(ctaInnerH * 0.65)}" font-family="${fontFamily}" font-size="${ctaPx}" font-weight="700" fill="white" letter-spacing="1" text-anchor="middle">${esc(ctaNumber)}</text>`,
+  )
+
+  return parts.join('\n')
+}
+
 export function buildCompositeSVG(opts: {
   decision: CreativeDecision
-  copy: { headline: string; subline: string; cta: string }
+  copy: { headline: string; subline: string; cta: string; preHeadline?: string }
   palette: Record<string, string>
   W: number
   H: number
@@ -1352,9 +1581,23 @@ export function buildCompositeSVG(opts: {
 
   const gradientStart = Math.max(0, 100 - tokens.gradientCoverage)
 
-  const defs      = buildDefs(layout, tokens, effects, palette, W, H, gradientStart)
-  const clipDef   = buildClipPath(W, H, safeH, safeTop, safeBot)
-  const bgLayers  = buildBackgroundLayers(layout, style, tokens, effects, palette, W, H)
+  const defs     = buildDefs(layout, style, tokens, effects, palette, W, H, gradientStart)
+  const clipDef  = buildClipPath(W, H, safeH, safeTop, safeBot)
+  const bgLayers = buildBackgroundLayers(layout, style, tokens, effects, palette, W, H)
+
+  const isAutomotive = (style as string).startsWith('AUTOMOTIVE')
+
+  if (isAutomotive) {
+    // Template cinematográfico automotivo: texto gerenciado por buildAutomotiveTextBlock
+    const autoText = buildAutomotiveTextBlock({ copy, palette, fontFamily, W, H, safeH })
+    return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+${fontFaceStyle}
+${defs}
+${bgLayers}
+${autoText}
+</svg>`
+  }
+
   const textBlock = buildTextBlock({
     layout, tokens, typo: typography,
     copy, palette, fontFamily,
@@ -1389,11 +1632,14 @@ export interface LogoPlacement {
   corner: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left'
 }
 
-export function getLogoPlacement(layout: Layout, W: number, H: number): LogoPlacement {
+export function getLogoPlacement(layout: Layout, W: number, H: number, isAutomotive = false): LogoPlacement {
   const safeH   = Math.round(W * 0.07)   // margem lateral
   const safeTop = Math.round(H * 0.10)   // margem superior
   const safeBot = Math.round(H * 0.10)   // margem inferior
-  const logoW   = Math.min(Math.round(W * 0.18), 180)  // 18%: assinatura, não protagonista
+  // Automotive: logo ligeiramente maior (20%) para manter visibilidade em cenas complexas
+  const logoW   = isAutomotive
+    ? Math.min(Math.round(W * 0.20), 200)
+    : Math.min(Math.round(W * 0.18), 180)
   const gap     = Math.round(safeH * 0.6)
 
   // Mapeamento layout → canto menos conflitante com o bloco de texto

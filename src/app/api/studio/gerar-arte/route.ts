@@ -1,3 +1,4 @@
+// v4.0 — Premium Art Direction Engine (automotive mode, product staging, smart contrast)
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@/lib/supabase/server'
@@ -15,6 +16,11 @@ import {
   prepareLogo, buildLogoCompositeLayers,
   type SharpLayer,
 } from '@/lib/brand-asset'
+import {
+  detectAutomotiveContext, analyzeProductStaging, buildAutomotivePromptDirectives,
+  analyzeContrastRisk, buildDebugLog,
+  type ProductStagingResult,
+} from '@/lib/product-staging'
 
 // ── Retry (trata 529 overloaded e 500 transientes) ────────────
 // 5 tentativas, backoff exponencial com jitter: ~5s, 10s, 20s, 40s, 80s
@@ -95,7 +101,7 @@ async function downloadGoogleFont(family: string, weight = '700'): Promise<strin
 
 async function sharpComposite(
   imageBase64: string,
-  copy: { headline: string; subline: string; cta: string },
+  copy: { headline: string; subline: string; cta: string; preHeadline?: string },
   palette: Record<string, string>,
   W: number, H: number,
   googleFont?: string,
@@ -396,6 +402,43 @@ async function runPipeline(ctx: PipelineCtx) {
       }
     }
 
+    // ── Passo 1.5: Product Staging Analysis ──────────────────
+    // Detecta tipo de produto, risco de contraste e modo automotivo
+    let stagingResult: ProductStagingResult | null = null
+    const isAutomotiveContext = detectAutomotiveContext(briefing, niche)
+
+    if (productImageUrl) {
+      try {
+        const imgForStaging = await fetchImageAsBase64(productImageUrl)
+        if (imgForStaging) {
+          stagingResult = await analyzeProductStaging(
+            imgForStaging.data, imgForStaging.mediaType as 'image/jpeg' | 'image/png' | 'image/webp', briefing, anthropic,
+          )
+        }
+      } catch (err) {
+        console.warn('[studio] Product Staging falhou, usando fallback:', err)
+      }
+    }
+    // Fallback / override: se o nicho/briefing tem contexto automotivo,
+    // garante is_automotive=true mesmo que a visão não detectou (briefing sem keywords explícitas)
+    if (isAutomotiveContext) {
+      if (!stagingResult) {
+        stagingResult = {
+          product_detected: true, product_category: 'vehicle',
+          product_main_color: 'unknown', product_luminance: 'medium',
+          product_angle: 'front_3_4', product_crop_quality: 'good',
+          background_removed: !!productImageUrl,
+          recommended_stage_style: 'AUTOMOTIVE_PREMIUM', recommended_layout: 'HERO_RIGHT',
+          contrast_risk: 'medium', visual_priority_score: 80,
+          is_automotive: true, needs_product_spotlight: false,
+          text_zone: 'bottom', overlay_safe_percent: 26,
+        }
+      } else if (!stagingResult.is_automotive) {
+        // A visão analisou mas não detectou veículo — niche/briefing override
+        stagingResult = { ...stagingResult, is_automotive: true, recommended_stage_style: 'AUTOMOTIVE_PREMIUM', overlay_safe_percent: 26 }
+      }
+    }
+
     // ── Passo 2: Vision Analyzer ─────────────────────────────
     let visionAnalysis: Record<string, unknown> = {}
     let referenceStyle = ''
@@ -486,21 +529,33 @@ Se houver texto visível na imagem, detecte a tipografia e sugira o Google Font 
     // ── Passo 5: Copywriter ──────────────────────────────────
     await updateJob(supabase, jobId, { status: 'copywriting', current_agent: 'Copywriter', progress_pct: 45 })
 
-    const copyRes = await withRetry(() => anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001', max_tokens: 512,
-      system: `Retorne APENAS JSON puro:
+    const copySystemPrompt = stagingResult?.is_automotive
+      ? `Retorne APENAS JSON puro:
+{"preHeadline":"","headline":"","subline":"","cta":"","caption":""}
+MODO AUTOMOTIVO — REGRAS OBRIGATÓRIAS:
+- preHeadline: modelo + ano do veículo extraído do briefing (ex: "FIORINO 2026"). MAIÚSCULAS. Máx 4 palavras.
+- headline: tagline impactante em 2 linhas separadas por \\n. A ÚLTIMA linha receberá destaque em cor accent — escolha palavras de alto impacto para ela (ex: "ELEGÂNCIA QUE TRABALHA\\nPARA VOCÊ"). Sem pontuação. MAIÚSCULAS.
+- subline: frase de benefício curta (máx 8 palavras) + pipe + 3 benefícios do veículo (máx 3 palavras cada) separados por pipe. Ex: "Mais eficiência para o dia a dia. | AMPLA CAPACIDADE | MELHOR ECONOMIA | ROBUSTEZ E CONFIANÇA"
+- cta: número de WhatsApp extraído do briefing OU "(XX) XXXXX-XXXX". Se não houver número, use "AGENDE SEU TEST DRIVE".
+- caption: legenda com emojis e hashtags automotivas.`
+      : `Retorne APENAS JSON puro:
 {"headline":"","subline":"","cta":"","caption":""}
 REGRAS OBRIGATÓRIAS:
 - Headline: máximo 4 palavras fortes (máx 22 caracteres). O produto é o destaque visual — a headline complementa, não domina.
 - Subline: máx 8 palavras, uma frase de benefício.
 - CTA: 2-3 palavras diretas.
-- Caption: texto para legenda com emojis e hashtags.`,
+- Caption: texto para legenda com emojis e hashtags.`
+
+    const copyRes = await withRetry(() => anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001', max_tokens: 512,
+      system: copySystemPrompt,
       messages: [{ role: 'user', content: `Estratégia: ${JSON.stringify(strategy)}\nBriefing: ${briefing}\nEmpresa: ${companyName}\nCTAs da marca: ${preferredCtas}\nNicho: ${niche}` }],
     }))
-    const copyOutput = parseJson<{ headline: string; subline: string; cta: string; caption: string }>(
+    const copyRaw = parseJson<{ headline: string; subline: string; cta: string; caption: string; preHeadline?: string }>(
       copyRes.content[0].type === 'text' ? copyRes.content[0].text : '{}',
-      { headline: briefing.slice(0, 30), subline: '', cta: 'Saiba mais', caption: briefing }
+      { headline: 'OFERTA ESPECIAL', subline: strategy.main_promise ?? '', cta: 'Saiba mais', caption: briefing }
     )
+    const copyOutput = { ...copyRaw }
     await updateJob(supabase, jobId, { copy_output: copyOutput })
 
     // ── Passo 6: Diretor Criativo IA ─────────────────────────
@@ -532,6 +587,16 @@ REGRAS OBRIGATÓRIAS:
 
     const nicheDefaults = NICHE_DEFAULTS[niche] ?? NICHE_DEFAULTS['servicos'] ?? {}
     const nicheV3Defaults = NICHE_CREATIVE_DEFAULTS_V3[niche] ?? NICHE_CREATIVE_DEFAULTS_V3['servicos']
+
+    // Se staging detectou contexto automotivo, sobrescreve o style padrão do nicho
+    const effectiveStyleDefault = stagingResult?.is_automotive
+      ? (stagingResult.recommended_stage_style as VisualStyle)
+      : (nicheDefaults.style ?? 'CINEMATIC')
+
+    const automotiveNote = stagingResult?.is_automotive
+      ? `\nMODO AUTOMOTIVO ATIVO: use style="${effectiveStyleDefault}". Veículo é herói visual — NÃO use AGGRESSIVE/DRAMATIC emotional_density. NÃO use effects (GRAIN/GLOW). emotional_density deve ser PREMIUM ou CINEMATIC.`
+      : ''
+
     const decisionRes = await withRetry(() => anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001', max_tokens: 640,
       system: `Diretor de Arte Digital. Analise o briefing e retorne APENAS JSON puro com a decisão criativa:
@@ -548,49 +613,24 @@ LAYOUTS disponíveis — escolha o mais impactante para o objetivo:
 - ASYMMETRIC: bloco de texto offset, tensão visual criativa
 
 STYLES: CINEMATIC | LUXURY | SPORT | TECH | MINIMAL | NEON | CORPORATE | EDITORIAL | STREET
-EFFECTS (máx 2): GLOW | GRAIN | LIGHT_LEAK | SMOKE (use com critério)
+       | AUTOMOTIVE_PREMIUM | AUTOMOTIVE_OFFER | AUTOMOTIVE_LUXURY
+       | AUTOMOTIVE_URBAN | AUTOMOTIVE_CLEAN | AUTOMOTIVE_SPORT
+EFFECTS (máx 2, zero para automotive): GLOW | GRAIN | LIGHT_LEAK | SMOKE
 TYPOGRAPHY: BOLD_IMPACT | ELEGANT | CONDENSED | STACKED | FLOATING
 
-EYE_FLOW — padrão perceptivo de leitura:
-- Z_PATTERN: varredura ocidental clássica top-left→top-right→diagonal→bottom-right
-- F_PATTERN: dois scans horizontais da esquerda (conteúdo/serviço)
-- DIAGONAL_LEFT: energia descendente upper-right→lower-left
-- DIAGONAL_RIGHT: energia ascendente lower-left→upper-right (aspiracional)
-- CENTER_EXPLOSION: elemento central irradia para fora (impacto)
-- HERO_TO_CTA: sujeito→headline→CTA fluxo publicitário clássico
-- FACE_TO_HEADLINE: olhar/gesto do personagem conduz ao título (use só com pessoa)
-
-EMOTIONAL_DENSITY — intensidade visual emocional:
-- AGGRESSIVE: contraste máximo, tensão visual intensa (academia/offroad)
-- ENERGETIC: dinâmico, movimento, vibrante (esporte/promoções)
-- PREMIUM: respiro, suavidade, refinamento (luxo/moda premium)
-- CLEAN: espaço negativo forte, mínimo ruído (tech/minimalismo)
-- CORPORATE: profissional, sóbrio, confiança (serviços/político)
-- URBAN: grain pesado, autêntico, street (moda urbana/cultura)
-- CINEMATIC: atmosfera fílmica, profundidade, drama (cinema/veículos)
-- DRAMATIC: intensidade teatral, vignette máximo (fashion/impacto)
-- MINIMAL: ultra clean, sem efeitos, sereno (alimentação/wellbeing)
-- SOFT: gentil, acolhedor, leveza (infantil/saúde/beleza)
-
-CAMERA_TYPE — enquadramento cinematográfico:
-- HERO_CLOSEUP: 85mm retrato, bokeh, íntimo
-- LOW_ANGLE: ângulo baixo dramático, poder e dominância
-- WIDE_CINEMATIC: anamórfico épico, escala grandiosa
-- DEPTH_COMPRESSION: 200mm telephoto, perspectiva comprimida
-- CENTER_HERO: 50mm centrado, direto e confiante
-- DYNAMIC_PERSPECTIVE: ultra-wide distortion, energia extrema
-- PRODUCT_SPOTLIGHT: macro/100mm, detalhe seletivo do produto
-- MAGAZINE_SHOT: editorial 85-120mm, sofisticado
+EYE_FLOW: Z_PATTERN | F_PATTERN | DIAGONAL_LEFT | DIAGONAL_RIGHT | CENTER_EXPLOSION | HERO_TO_CTA | FACE_TO_HEADLINE
+EMOTIONAL_DENSITY: AGGRESSIVE | ENERGETIC | PREMIUM | CLEAN | CORPORATE | URBAN | CINEMATIC | DRAMATIC | MINIMAL | SOFT
+CAMERA_TYPE: HERO_CLOSEUP | LOW_ANGLE | WIDE_CINEMATIC | DEPTH_COMPRESSION | CENTER_HERO | DYNAMIC_PERSPECTIVE | PRODUCT_SPOTLIGHT | MAGAZINE_SHOT
 
 image_direction: instrução em inglês sobre composição e posicionamento do sujeito (30-50 palavras).`,
-      messages: [{ role: 'user', content: `Nicho: ${niche}\nEmoção: ${creativeBrief.campaign_emotion}\nEstilo: ${creativeBrief.visual_style}\nObjetivo: ${strategy.objective ?? briefing}\nTem pessoa: ${String(visionAnalysis.has_person)}\nTem produto: ${!!productImageUrl}\nFormato: ${W}×${H}px\nDefault do nicho: ${JSON.stringify(nicheDefaults)}\nDefault v3 do nicho: ${JSON.stringify(nicheV3Defaults)}` }],
+      messages: [{ role: 'user', content: `Nicho: ${niche}\nEmoção: ${creativeBrief.campaign_emotion}\nEstilo: ${creativeBrief.visual_style}\nObjetivo: ${strategy.objective ?? briefing}\nTem pessoa: ${String(visionAnalysis.has_person)}\nTem produto: ${!!productImageUrl}\nFormato: ${W}×${H}px\nDefault do nicho: ${JSON.stringify({ ...nicheDefaults, style: effectiveStyleDefault })}\nDefault v3 do nicho: ${JSON.stringify(nicheV3Defaults)}${automotiveNote}` }],
     }))
     const creativeDecision: CreativeDecision = parseJson<CreativeDecision>(
       decisionRes.content[0].type === 'text' ? decisionRes.content[0].text : '{}',
       {
         layout: (nicheDefaults.layout ?? 'HERO_RIGHT') as Layout,
-        style: (nicheDefaults.style ?? 'CINEMATIC') as VisualStyle,
-        effects: nicheDefaults.effects ?? [],
+        style: effectiveStyleDefault,
+        effects: stagingResult?.is_automotive ? [] : (nicheDefaults.effects ?? []),
         typography: (nicheDefaults.typography ?? 'STACKED') as TypographyBehavior,
         composition: creativeBrief.composition,
         asset_strategy: 'PRODUCT_HERO',
@@ -599,10 +639,15 @@ image_direction: instrução em inglês sobre composição e posicionamento do s
         image_direction: '',
         eye_flow: (nicheV3Defaults?.eye_flow ?? 'HERO_TO_CTA') as EyeFlowPattern,
         emotional_density: (nicheV3Defaults?.emotional_density ?? 'ENERGETIC') as EmotionalToken,
-        camera_type: (nicheV3Defaults?.camera_type ?? 'CENTER_HERO') as CameraType,
+        camera_type: (nicheV3Defaults?.camera_type ?? 'LOW_ANGLE') as CameraType,
       }
     )
-    // Auto-corrigir combinações incoerentes (LUXURY+BOLD_IMPACT, SPORT+ELEGANT, etc.)
+    // Força style automotive se staging detectou (o AI pode ignorar a instrução)
+    if (stagingResult?.is_automotive && !(creativeDecision.style as string).startsWith('AUTOMOTIVE')) {
+      creativeDecision.style = effectiveStyleDefault
+      creativeDecision.effects = []
+    }
+    // Auto-corrigir combinações incoerentes (LUXURY+BOLD_IMPACT, AUTOMOTIVE+AGGRESSIVE, etc.)
     const correctedDecision = applyDecisionCorrections(creativeDecision)
 
     // Visual Scoring V2: loga qualidade perceptiva e blockers críticos
@@ -635,6 +680,11 @@ image_direction: instrução em inglês sobre composição e posicionamento do s
     const logoNote = logoPlacement
       ? `\nLogo overlay: a company logo will be placed at the ${logoPlacement.corner} corner. Keep that area visually clean and uncluttered — avoid placing key subject elements or bright highlights there.`
       : ''
+    // Automotive Prompt Directives — injetadas quando produto é veículo
+    const automotiveDirectives = stagingResult?.is_automotive
+      ? `\nAUTOMOTIVE ART DIRECTION:\n${buildAutomotivePromptDirectives(stagingResult, stagingResult.overlay_safe_percent)}`
+      : ''
+
     const decisionNote = [
       correctedDecision.image_direction ? `Creative direction: ${correctedDecision.image_direction}` : '',
       promptEnhancement ? `Photographic guidance: ${promptEnhancement}` : '',
@@ -645,6 +695,7 @@ image_direction: instrução em inglês sobre composição e posicionamento do s
       system: `You are an expert Visual Prompt Engineer for AI image generation (Flux, Imagen 3, DALL-E 3, Ideogram).
 Create a single highly detailed commercial advertising photography prompt in English.
 CRITICAL: The prompt describes ONLY the scene/image. Do NOT include any text, words, headlines, logos, or typography in the prompt — text will be added as overlay later.
+${stagingResult?.is_automotive ? 'You are specialized in PREMIUM AUTOMOTIVE ADVERTISING. The vehicle must be the undisputed hero of the image. Never allow dark gradients or overlays to obscure the vehicle body.' : ''}
 Return ONLY the prompt text. No explanations, no JSON, no markdown.`,
       messages: [{ role: 'user', content: `Create an image prompt for this advertising campaign:
 
@@ -662,7 +713,7 @@ Visual style: ${correctedDecision.style} | Mood: ${correctedDecision.mood}
 Required elements: ${creativeBrief.required_elements.join(', ')}
 Forbidden elements (must NOT appear): ${creativeBrief.forbidden_elements.join(', ')}
 Safety: ${creativeBrief.content_safety === 'safe_for_all' ? 'safe for all ages, no adult content' : 'general adult audience'}
-Image dimensions: ${W}×${H}px${referenceNote}${logoNote}${decisionNote}
+Image dimensions: ${W}×${H}px${referenceNote}${logoNote}${decisionNote}${automotiveDirectives}
 
 RULES:
 - If a specific product name/brand/model was mentioned in the briefing, use it EXACTLY (e.g. "Fiat Toro 2026 pickup truck" not "a pickup truck")
@@ -788,7 +839,7 @@ passed = score >= 65` },
           removeBgKey,
         )
         if (prepared) {
-          const placement = getLogoPlacement(correctedDecision.layout, W, H)
+          const placement = getLogoPlacement(correctedDecision.layout, W, H, stagingResult?.is_automotive)
           logoLayers = await buildLogoCompositeLayers(prepared, placement, W, H)
           console.log(`[studio] logo pronta: mode=${prepared.mode} bg=${prepared.analysis.bgType}`)
         }
