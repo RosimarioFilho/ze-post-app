@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { buildZePremiumPrompt, type ZePremiumNiche, type ZePremiumStyle } from '@/lib/ze-premium-prompt-builder'
 import { SOCIAL_FORMATS, type SocialFormatId } from '@/lib/social-formats'
-import { computeSafeAreaScores } from '@/lib/safe-area-engine'
+import { computeSafeAreaScores, computeProductSafeScore } from '@/lib/safe-area-engine'
+import { getCompositionMode } from '@/lib/layout-composition-engine'
 import { generateImage } from '@/lib/imageProvider'
 
 export const maxDuration = 120
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
       `headline="${headline}" hasProduct=${!!productImageBase64} ` +
       `genSize=${format.genW}x${format.genH}`
     )
-    console.log(`[ze-premium] Prompt: ${prompt.slice(0, 250)}...`)
+    console.log(`[ze-premium] Prompt: ${prompt.slice(0, 300)}...`)
 
     const result = await generateImage(
       prompt,
@@ -63,7 +64,11 @@ export async function POST(req: NextRequest) {
 
     console.log(`[ze-premium] Arte gerada via ${result.provider} (${format.genW}×${format.genH})`)
 
-    const safeAreaScores = computeSafeAreaScores(format)
+    // Scores e metadados de composição
+    const safeAreaScores    = computeSafeAreaScores(format)
+    const productSafeScore  = computeProductSafeScore(format)
+    const compositionMode   = getCompositionMode(format)
+    const copyVariationId   = Math.round(Date.now() % 1000)
 
     return NextResponse.json({
       imageBase64: result.base64,
@@ -73,6 +78,10 @@ export async function POST(req: NextRequest) {
       formatId: format.id,
       formatLabel: format.label,
       safeAreaScores,
+      productSafeScore,
+      compositionMode,
+      copyVariationId,
+      formatRiskLevel: safeAreaScores.risk_level,
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

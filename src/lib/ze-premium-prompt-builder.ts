@@ -1,10 +1,24 @@
-// ── Zé Premium — Prompt Builder ───────────────────────────────────
+// ── Zé Premium — Prompt Builder ───────────────────────────────────────
 // Gera prompts multimodais que instruem o modelo a compor headline,
 // subheadline e CTA diretamente dentro da imagem gerada.
 // Sem overlay, sem HTML, sem composição posterior.
+//
+// Ordem dos blocos:
+//   0. FORMAT + TEXT SAFE AREA
+//   1. PRODUCT / HERO SAFE AREA
+//   2. LAYOUT COMPOSITION MODE
+//   3. STYLE BLOCK
+//   4. PRODUCT / NICHE BLOCK
+//   5. MOOD + OBJECTIVE BLOCK
+//   6. COPY BLOCK (headline, subheadline, CTA)
+//   7. TYPOGRAPHY BLOCK
+//   8. ATMOSPHERE + LIGHTING BLOCK
+//   9. QUALITY BLOCK
+//  10. NEGATIVE PROMPT BLOCK
 
 import type { SocialFormat } from './social-formats'
-import { buildSafeAreaGuidance } from './safe-area-engine'
+import { buildSafeAreaGuidance, buildProductSafeAreaGuidance } from './safe-area-engine'
+import { buildCompositionGuidance } from './layout-composition-engine'
 
 export type ZePremiumNiche =
   | 'automotivo'
@@ -77,7 +91,7 @@ const STYLE_PRESETS: Record<ZePremiumStyle, StylePreset> = {
     style: 'cinematic commercial film campaign, movie poster advertising aesthetic, Hollywood quality',
     mood: 'dramatic, epic, emotional, powerful storytelling, larger than life',
     lighting: 'cinematic volumetric rays, golden hour warm side light or cool blue dramatic moonlight, atmospheric haze depth',
-    composition: 'wide cinematic 16:9 feel adapted to square, rule of thirds, subject with dramatic environmental context, layered depth',
+    composition: 'wide cinematic feel adapted to format, rule of thirds, subject with dramatic environmental context, layered depth',
     atmosphere: 'cinematic color grade, teal and orange Hollywood palette or high contrast monochromatic, subtle film grain texture',
     typography: 'bold cinematic movie poster typeface, large dramatic headline, strong text shadow for readability, epic advertising scale',
     quality: 'cinema-grade photography render, blockbuster visual quality, ultra detailed, immersive scene',
@@ -122,7 +136,7 @@ const NICHE_BOOSTERS: Record<ZePremiumNiche, string> = {
   educacao:      'educational brand context, knowledge and growth visual metaphor, modern professional learning aesthetic',
 }
 
-// Instruções de composição tipográfica por estilo
+// Instruções de posicionamento tipográfico por estilo
 const TYPOGRAPHY_PLACEMENT: Record<ZePremiumStyle, string> = {
   automotive_premium: 'place the headline text on the left dark panel area, bottom-left corner for CTA, text must be clearly readable, never overlap the vehicle',
   premium_dark:       'headline in upper or center-left area on dark background, CTA button at bottom, strong contrast text',
@@ -146,23 +160,36 @@ export interface ZePremiumPromptInput {
 }
 
 export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
-  const preset      = STYLE_PRESETS[input.style] ?? STYLE_PRESETS.premium_dark
-  const nicheBoost  = NICHE_BOOSTERS[input.niche] ?? ''
-  const typoPlace   = TYPOGRAPHY_PLACEMENT[input.style] ?? ''
+  const preset     = STYLE_PRESETS[input.style] ?? STYLE_PRESETS.premium_dark
+  const nicheBoost = NICHE_BOOSTERS[input.niche] ?? ''
+  const typoPlace  = TYPOGRAPHY_PLACEMENT[input.style] ?? ''
 
   const blocks: string[] = []
 
-  // ── 0. FORMAT + SAFE AREA BLOCK ──────────────────────────────
-  // Deve ser o primeiro bloco para que o modelo entenda o contexto
-  // de plataforma antes de decidir qualquer composição tipográfica
+  // ── 0. FORMAT + TEXT SAFE AREA ───────────────────────────────────
+  // Primeiro bloco — o modelo precisa saber o contexto de plataforma
+  // antes de decidir qualquer composição tipográfica
   if (input.format) {
     blocks.push(buildSafeAreaGuidance(input.format))
   }
 
-  // ── 1. STYLE BLOCK ──────────────────────────────────────────
+  // ── 1. PRODUCT / HERO SAFE AREA ──────────────────────────────────
+  // Segundo bloco — garante que o produto principal não será cortado
+  // Especialmente crítico em formatos verticais 9:16
+  if (input.format) {
+    blocks.push(buildProductSafeAreaGuidance(input.format))
+  }
+
+  // ── 2. LAYOUT COMPOSITION MODE ───────────────────────────────────
+  // Instruções de layout adaptativo por aspecto e plataforma
+  if (input.format) {
+    blocks.push(buildCompositionGuidance(input.format))
+  }
+
+  // ── 3. STYLE BLOCK ───────────────────────────────────────────────
   blocks.push(preset.style)
 
-  // ── 2. PRODUCT BLOCK ─────────────────────────────────────────
+  // ── 4. PRODUCT / NICHE BLOCK ─────────────────────────────────────
   if (input.hasProductImage) {
     blocks.push(`${nicheBoost}, product is the absolute visual hero of the composition`)
     blocks.push('preserve the product exactly as provided in the reference — do not alter colors, shape or proportions')
@@ -170,13 +197,13 @@ export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
     blocks.push(nicheBoost)
   }
 
-  // ── 3. MOOD BLOCK ────────────────────────────────────────────
+  // ── 5. MOOD + OBJECTIVE BLOCK ────────────────────────────────────
   blocks.push(preset.mood)
   if (input.objective) {
     blocks.push(`campaign message: ${input.objective}`)
   }
 
-  // ── 4. COPY BLOCK — textos renderizados diretamente na imagem ──
+  // ── 6. COPY BLOCK — textos renderizados diretamente na imagem ──────
   // O modelo multimodal deve compor e integrar estes textos na arte
   const copyParts: string[] = []
 
@@ -190,28 +217,53 @@ export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
     copyParts.push(`modern premium CTA element at the bottom saying exactly: "${input.cta}"`)
   }
 
+  // Instrução de cor harmônica para destaque visual
+  copyParts.push(
+    'the highlight phrase or key words in the headline may use a premium accent color harmonizing with the artwork palette — ' +
+    'choose a color that complements the scene, product and brand identity; ' +
+    'maintain strong readability and contrast; ' +
+    'if the background is dark, warm ivory, gold, amber or electric cyan are allowed only when visually coherent; ' +
+    'if contrast is weak, place text on a subtle dark glassmorphism backing'
+  )
+
   blocks.push(copyParts.join(', '))
 
-  // ── 5. TYPOGRAPHY BLOCK ───────────────────────────────────────
+  // ── 7. TYPOGRAPHY BLOCK ──────────────────────────────────────────
   blocks.push(preset.typography)
   blocks.push(typoPlace)
-  blocks.push('text must be perfectly legible, professional typesetting quality, no handwritten style, no distorted letters')
+  blocks.push('text must be perfectly legible, professional typesetting quality, no handwritten style, no distorted letters, no random fonts')
 
-  // ── 6. COMPOSITION BLOCK ─────────────────────────────────────
+  // ── 8. ATMOSPHERE + LIGHTING BLOCK ──────────────────────────────
   blocks.push(preset.composition)
-  blocks.push('product and typography coexist without competing — clear visual hierarchy, product is hero, text is supporting')
-
-  // ── 7. ATMOSPHERE BLOCK ───────────────────────────────────────
+  blocks.push('product and typography coexist without competing — clear visual hierarchy, product is hero, text is supporting element')
   blocks.push(preset.atmosphere)
   blocks.push(preset.lighting)
 
-  // ── 8. QUALITY BLOCK ─────────────────────────────────────────
+  // ── 9. QUALITY BLOCK ─────────────────────────────────────────────
   blocks.push(preset.quality)
   const platformLabel = input.format?.label ?? 'Instagram'
   blocks.push(
     `complete advertising piece ready for ${platformLabel}, ` +
     'professional campaign quality, photorealistic render, no lorem ipsum, no placeholder text, ' +
-    'all text elements fully within safe composition area'
+    'all text elements fully within safe composition area, all elements clearly within canvas bounds'
+  )
+
+  // ── 10. NEGATIVE PROMPT BLOCK ────────────────────────────────────
+  // Instruções explícitas do que evitar — reforça as regras anteriores
+  blocks.push(
+    'AVOID ALL OF THE FOLLOWING: ' +
+    'no cropped product at any canvas edge, ' +
+    'no oversized vehicle or subject that fills the entire frame edge-to-edge, ' +
+    'no text placed outside the safe area margins, ' +
+    'no letters cut off or hidden at the image border, ' +
+    'no CTA positioned near the bottom platform UI zone, ' +
+    'no logo touching or overflowing any canvas border, ' +
+    'no product touching the canvas border directly, ' +
+    'no distorted or warped typography, ' +
+    'no cluttered layout with elements competing for attention, ' +
+    'no element overlapping the platform UI danger zones, ' +
+    'no generic stock image aesthetic, ' +
+    'no tight zoom crop that removes product context'
   )
 
   return blocks.join(',\n')

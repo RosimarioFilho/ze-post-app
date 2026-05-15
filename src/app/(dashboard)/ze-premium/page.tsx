@@ -5,6 +5,7 @@ import { Upload, Sparkles, Download, RefreshCw, X, ImageIcon, Zap, Type, Monitor
 import type { ZePremiumNiche, ZePremiumStyle } from '@/lib/ze-premium-prompt-builder'
 import { SOCIAL_FORMATS, type SocialFormatId } from '@/lib/social-formats'
 import type { SafeAreaScores } from '@/lib/safe-area-engine'
+import type { LayoutCompositionMode } from '@/lib/layout-composition-engine'
 
 // ── Opções ────────────────────────────────────────────────────
 
@@ -51,6 +52,10 @@ interface GenerateResult {
   formatId?: SocialFormatId
   formatLabel?: string
   safeAreaScores?: SafeAreaScores
+  productSafeScore?: number
+  compositionMode?: LayoutCompositionMode
+  copyVariationId?: number
+  formatRiskLevel?: 'low' | 'medium' | 'high'
 }
 
 interface UploadedImage {
@@ -201,6 +206,8 @@ function ResultCard({ result, onRegenerate }: { result: GenerateResult; onRegene
   const dataUrl    = `data:${result.mimeType};base64,${result.imageBase64}`
   const formatId   = result.formatId ?? 'INSTAGRAM_POST'
   const aspectCls  = getAspectClass(formatId)
+  const fmt        = SOCIAL_FORMATS[formatId]
+  const isVertical = fmt?.genH > fmt?.genW
 
   function handleDownload() {
     const a = document.createElement('a')
@@ -211,6 +218,27 @@ function ResultCard({ result, onRegenerate }: { result: GenerateResult; onRegene
     <div className="rounded-2xl border border-white/8 bg-white/2 overflow-hidden">
       <div className={`relative ${aspectCls} w-full`}>
         <img src={dataUrl} alt="Arte premium gerada" className="w-full h-full object-cover" />
+
+        {/* Safe area overlay — apenas formatos verticais com danger zones */}
+        {isVertical && fmt?.dangerZoneIds?.length > 0 && (
+          <>
+            {/* Top danger zone */}
+            <div className="absolute top-0 left-0 right-0 h-[15%] bg-red-500/10 border-b border-red-400/20 pointer-events-none" />
+            {/* Bottom danger zone */}
+            <div className="absolute bottom-0 left-0 right-0 h-[18%] bg-red-500/10 border-t border-red-400/20 pointer-events-none" />
+            {/* Right action bar (se existir) */}
+            {fmt.dangerZoneIds.some(id => id.includes('right') || id.includes('tiktok')) && (
+              <div className="absolute top-0 right-0 bottom-0 w-[12%] bg-amber-500/8 border-l border-amber-400/15 pointer-events-none" />
+            )}
+            {/* Label */}
+            <div className="absolute top-[15%] left-2 right-2 flex justify-center pointer-events-none">
+              <span className="px-2 py-0.5 bg-black/50 backdrop-blur rounded text-[9px] text-white/30 border border-white/8">
+                ↕ Zona segura do produto
+              </span>
+            </div>
+          </>
+        )}
+
         <div className="absolute top-3 right-3 flex flex-col gap-2 items-end">
           <span className="px-2 py-1 bg-black/60 backdrop-blur rounded-lg text-xs text-white/50 border border-white/10">
             {result.provider}
@@ -229,21 +257,32 @@ function ResultCard({ result, onRegenerate }: { result: GenerateResult; onRegene
       </div>
       <div className="p-4 flex flex-col gap-3">
         {result.safeAreaScores && (
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            {[
-              { label: 'Headline',    score: result.safeAreaScores.headline_safe_score },
-              { label: 'CTA',         score: result.safeAreaScores.cta_safe_score },
-              { label: 'Logo',        score: result.safeAreaScores.logo_safe_score },
-              { label: 'Tipografia',  score: result.safeAreaScores.typography_margin_score },
-            ].map(({ label, score }) => (
-              <div key={label} className="flex items-center justify-between px-2.5 py-1.5 bg-white/4 rounded-lg">
-                <span className="text-white/40">{label}</span>
-                <span className={score >= 85 ? 'text-emerald-400' : score >= 70 ? 'text-yellow-400' : 'text-red-400'}>
-                  {score}
-                </span>
+          <>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              {[
+                { label: 'Headline',    score: result.safeAreaScores.headline_safe_score },
+                { label: 'CTA',         score: result.safeAreaScores.cta_safe_score },
+                { label: 'Logo',        score: result.safeAreaScores.logo_safe_score },
+                { label: 'Tipografia',  score: result.safeAreaScores.typography_margin_score },
+                ...(result.productSafeScore !== undefined
+                  ? [{ label: 'Produto', score: result.productSafeScore }]
+                  : []),
+              ].map(({ label, score }) => (
+                <div key={label} className="flex items-center justify-between px-2.5 py-1.5 bg-white/4 rounded-lg">
+                  <span className="text-white/40">{label}</span>
+                  <span className={score >= 85 ? 'text-emerald-400' : score >= 70 ? 'text-yellow-400' : 'text-red-400'}>
+                    {score}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {result.compositionMode && (
+              <div className="flex items-center gap-2 px-2.5 py-1.5 bg-white/3 rounded-lg text-xs">
+                <span className="text-white/25">Composição:</span>
+                <span className="text-violet-300/70 font-mono text-[10px]">{result.compositionMode}</span>
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
         <button onClick={handleDownload}
           className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-semibold text-sm hover:opacity-90 transition-opacity">
@@ -371,11 +410,19 @@ export default function ZePremiumPage() {
                   </option>
                 ))}
               </select>
-              {currentFmt.dangerZoneIds.length > 0 && (
+              {currentFmt.dangerZoneIds.length > 0 ? (
                 <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-500/8 border border-amber-500/20 rounded-xl">
                   <ShieldCheck className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-amber-300/70">
-                    Safe area ativa — {currentFmt.dangerZoneIds.length} zona{currentFmt.dangerZoneIds.length > 1 ? 's' : ''} de perigo da {currentFmt.platform} serão respeitadas automaticamente.
+                    Safe area ativa — {currentFmt.dangerZoneIds.length} zona{currentFmt.dangerZoneIds.length > 1 ? 's' : ''} de perigo da {currentFmt.platform} protegidas.
+                    {currentFmt.aspectRatio === '9:16' && ' Produto, textos e CTA protegidos para Stories/Reels.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/6 border border-emerald-500/15 rounded-xl">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                  <p className="text-xs text-emerald-300/60">
+                    Formato sem zonas de perigo — safe area padrão aplicada.
                   </p>
                 </div>
               )}
