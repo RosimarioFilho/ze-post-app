@@ -160,36 +160,106 @@ export interface ZePremiumPromptInput {
 }
 
 export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
+  const isVertical = input.format?.aspectRatio === '9:16'
+
+  // Formatos verticais usam uma estratégia de prompt completamente diferente.
+  // Modelos de geração de imagem respondem a analogias visuais curtas,
+  // NÃO a longas listas de regras técnicas com percentuais.
+  if (isVertical) {
+    return buildVertical916Prompt(input)
+  }
+
+  // ── PROMPT PADRÃO para 1:1 e landscape ─────────────────────────────
+  return buildStandardPrompt(input)
+}
+
+// ── Prompt para formatos verticais 9:16 ──────────────────────────────
+// Estratégia: CURTO, analogia visual, layout descrito narrativamente.
+// O layout é a PRIMEIRA coisa — não enterrado no bloco 7.
+function buildVertical916Prompt(input: ZePremiumPromptInput): string {
+  const preset     = STYLE_PRESETS[input.style] ?? STYLE_PRESETS.premium_dark
+  const nicheBoost = NICHE_BOOSTERS[input.niche] ?? ''
+  const platform   = input.format?.label ?? 'Instagram Stories'
+
+  // Bloco de copy da arte
+  const copyLines: string[] = [
+    `bold advertising headline text rendered inside the image reading exactly: "${input.headline}"`,
+  ]
+  if (input.subheadline?.trim()) {
+    copyLines.push(`subheadline text below reading exactly: "${input.subheadline}"`)
+  }
+  if (input.cta?.trim()) {
+    copyLines.push(`CTA button at bottom reading exactly: "${input.cta}"`)
+  }
+
+  // Referência ao produto
+  const productRef = input.hasProductImage
+    ? 'using the provided product reference image — preserve exact colors, shape and proportions, do not modify the product'
+    : nicheBoost
+
+  const parts: string[] = [
+
+    // ── 1. LAYOUT — primeiro e mais importante ──────────────────────
+    // Analogia visual simples: "magazine cover layout"
+    `A premium vertical ${platform} advertisement designed like a luxury magazine cover or professional car dealer poster: ` +
+    `the upper half of the image shows the complete product centered against a dramatic atmospheric background (the entire product fits inside the image with visible space around it), ` +
+    `and the lower half shows the advertising text block with headline and CTA clearly readable`,
+
+    // ── 2. Produto ─────────────────────────────────────────────────
+    `Product shown as a full product shot — the complete object with all sides visible, nothing cropped, ` +
+    `similar to how a product appears on a premium dealership catalog or magazine feature page, ` +
+    productRef,
+
+    // ── 3. Estilo visual ───────────────────────────────────────────
+    preset.style,
+    preset.mood,
+    preset.atmosphere,
+    preset.lighting,
+
+    // ── 4. Copy integrada na imagem ────────────────────────────────
+    copyLines.join(', '),
+    `${preset.typography}, text placed in the lower section of the image, fully inside the frame`,
+    `text uses a premium accent color that harmonizes with the scene — warm ivory, gold or white on dark backgrounds`,
+
+    // ── 5. Qualidade ───────────────────────────────────────────────
+    preset.quality,
+    `complete professional advertising artwork for ${platform}, all text legible, no distorted letters`,
+
+    // ── 6. Negativo — curto e direto ───────────────────────────────
+    `avoid: cropped product, vehicle filling entire frame, wheels or roof cut off, ` +
+    `text overlapping the product, text outside the image borders, letters cut at edges`,
+  ]
+
+  return parts.join(',\n')
+}
+
+// ── Prompt padrão para 1:1 e landscape ───────────────────────────────
+function buildStandardPrompt(input: ZePremiumPromptInput): string {
   const preset     = STYLE_PRESETS[input.style] ?? STYLE_PRESETS.premium_dark
   const nicheBoost = NICHE_BOOSTERS[input.niche] ?? ''
   const typoPlace  = TYPOGRAPHY_PLACEMENT[input.style] ?? ''
 
   const blocks: string[] = []
 
-  // ── 0. FORMAT + TEXT SAFE AREA ───────────────────────────────────
-  // Primeiro bloco — o modelo precisa saber o contexto de plataforma
-  // antes de decidir qualquer composição tipográfica
+  // ── 0. FORMAT + SAFE AREA ────────────────────────────────────────
   if (input.format) {
     blocks.push(buildSafeAreaGuidance(input.format))
   }
 
-  // ── 1. PRODUCT / HERO SAFE AREA ──────────────────────────────────
-  // Segundo bloco — garante que o produto principal não será cortado
-  // Especialmente crítico em formatos verticais 9:16
+  // ── 1. PRODUCT SAFE AREA ─────────────────────────────────────────
   if (input.format) {
     blocks.push(buildProductSafeAreaGuidance(input.format))
   }
 
-  // ── 2. LAYOUT COMPOSITION MODE ───────────────────────────────────
-  // Instruções de layout adaptativo por aspecto e plataforma
+  // ── 2. COMPOSITION MODE ──────────────────────────────────────────
   if (input.format) {
     blocks.push(buildCompositionGuidance(input.format))
   }
 
-  // ── 3. STYLE BLOCK ───────────────────────────────────────────────
+  // ── 3. STYLE ─────────────────────────────────────────────────────
   blocks.push(preset.style)
 
-  // ── 4. PRODUCT / NICHE BLOCK ─────────────────────────────────────
+  // ── 4. PRODUCT / NICHE ───────────────────────────────────────────
   if (input.hasProductImage) {
     blocks.push(`${nicheBoost}, product is the absolute visual hero of the composition`)
     blocks.push('preserve the product exactly as provided in the reference — do not alter colors, shape or proportions')
@@ -197,124 +267,53 @@ export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
     blocks.push(nicheBoost)
   }
 
-  // ── 5. MOOD + OBJECTIVE BLOCK ────────────────────────────────────
+  // ── 5. MOOD + OBJECTIVE ──────────────────────────────────────────
   blocks.push(preset.mood)
   if (input.objective) {
     blocks.push(`campaign message: ${input.objective}`)
   }
 
-  // ── 6. COPY BLOCK — textos renderizados diretamente na imagem ──────
-  // O modelo multimodal deve compor e integrar estes textos na arte
+  // ── 6. COPY ──────────────────────────────────────────────────────
   const copyParts: string[] = []
-
   copyParts.push(`large bold advertising headline rendered directly in the image saying exactly: "${input.headline}"`)
-
   if (input.subheadline?.trim()) {
     copyParts.push(`smaller premium subheadline below saying exactly: "${input.subheadline}"`)
   }
-
   if (input.cta?.trim()) {
     copyParts.push(`modern premium CTA element at the bottom saying exactly: "${input.cta}"`)
   }
-
-  // Instrução de cor harmônica para destaque visual
   copyParts.push(
-    'the highlight phrase or key words in the headline may use a premium accent color harmonizing with the artwork palette — ' +
-    'choose a color that complements the scene, product and brand identity; ' +
-    'maintain strong readability and contrast; ' +
-    'if the background is dark, warm ivory, gold, amber or electric cyan are allowed only when visually coherent; ' +
-    'if contrast is weak, place text on a subtle dark glassmorphism backing'
+    'headline accent color harmonizes with the artwork palette — ' +
+    'warm ivory, gold or white on dark backgrounds for strong readability'
   )
-
   blocks.push(copyParts.join(', '))
 
-  // ── 7. TYPOGRAPHY BLOCK ──────────────────────────────────────────
+  // ── 7. TYPOGRAPHY + PLACEMENT ────────────────────────────────────
   blocks.push(preset.typography)
+  blocks.push(typoPlace)
+  blocks.push('text perfectly legible, professional typesetting, no distorted letters')
 
-  // typoPlace: os presets foram desenhados para 1:1/landscape.
-  // Em 9:16, as instruções como "left dark panel" ou "right side" são
-  // incoerentes — o layout vertical tem zonas próprias definidas nos blocos 1-2.
-  // Só injetamos o typoPlace se o formato for quadrado ou landscape.
-  if (!input.format || input.format.aspectRatio !== '9:16') {
-    blocks.push(typoPlace)
-  } else {
-    // Para 9:16: headline abaixo do produto, dentro da zona segura central
-    blocks.push(
-      'For this vertical 9:16 format: ' +
-      'place headline text BELOW the product in the lower safe zone (between 60% and 80% from top), ' +
-      'CTA below the headline near the bottom safe boundary, ' +
-      'text aligned center or left with at least 8% margin from both sides, ' +
-      'text must never overlap the product or extend beyond canvas edges'
-    )
-  }
-
-  blocks.push('text must be perfectly legible, professional typesetting quality, no handwritten style, no distorted letters, no random fonts')
-
-  // ── 8. ATMOSPHERE + LIGHTING BLOCK ──────────────────────────────
-  // preset.composition: contém instruções como "hero vehicle filling 55% of frame"
-  // que foram escritas para formatos quadrados/landscape.
-  // Para 9:16, usar o preset.composition CONFLITA diretamente com as safe area rules
-  // dos blocos 1-3 (que limitam o produto a 45-52% da altura).
-  // Solução: para formatos verticais, substituímos por uma instrução neutra
-  // que defere às regras dos blocos anteriores.
-  if (!input.format || input.format.aspectRatio !== '9:16') {
-    blocks.push(preset.composition)
-  } else {
-    blocks.push(
-      'COMPOSITION FOR VERTICAL 9:16: ' +
-      'follow the layout composition rules defined above — ' +
-      'product fully visible in the upper-center zone, ' +
-      'scaled to fit without cropping, ' +
-      'surrounded by atmospheric depth background, ' +
-      'text zone clearly separated below the product'
-    )
-  }
-
-  blocks.push('product and typography coexist without competing — clear visual hierarchy, product is hero, text is supporting element')
+  // ── 8. COMPOSITION + ATMOSPHERE ──────────────────────────────────
+  blocks.push(preset.composition)
+  blocks.push('product and typography coexist without competing — product is hero, text is supporting')
   blocks.push(preset.atmosphere)
   blocks.push(preset.lighting)
 
-  // ── 9. QUALITY BLOCK ─────────────────────────────────────────────
+  // ── 9. QUALITY ───────────────────────────────────────────────────
   blocks.push(preset.quality)
   const platformLabel = input.format?.label ?? 'Instagram'
   blocks.push(
     `complete advertising piece ready for ${platformLabel}, ` +
-    'professional campaign quality, photorealistic render, no lorem ipsum, no placeholder text, ' +
-    'all text elements fully within safe composition area, all elements clearly within canvas bounds'
+    'professional campaign quality, photorealistic render, no lorem ipsum, ' +
+    'all text within safe composition area'
   )
 
-  // ── 10. NEGATIVE PROMPT BLOCK ────────────────────────────────────
-  // Instruções explícitas do que evitar — reforça as regras anteriores
-  const negativeBase = [
-    'STRICTLY AVOID ALL OF THE FOLLOWING:',
-    'no cropped product at any canvas edge — the ENTIRE product must be visible',
-    'no vehicle or subject filling the ENTIRE frame edge-to-edge with no breathing room',
-    'no text placed outside the safe area margins',
-    'no letters cut off or hidden at the image border',
-    'no headline text that overflows beyond the right or left canvas edges',
-    'no CTA positioned near the bottom platform UI zone',
-    'no logo touching or overflowing any canvas border',
-    'no product body touching the canvas border directly',
-    'no distorted or warped typography',
-    'no cluttered layout with elements competing for attention',
-    'no element overlapping the platform UI danger zones',
-    'no generic stock image aesthetic',
-    'no tight zoom crop that removes product context and environment',
-  ]
-
-  // Reforço específico para 9:16
-  if (input.format?.aspectRatio === '9:16') {
-    negativeBase.push(
-      'VERTICAL FORMAT CRITICAL: do NOT fill the entire canvas height with the vehicle/product',
-      'do NOT place the vehicle so large it gets cropped at the top or sides of the canvas',
-      'do NOT put headline text overlapping the vehicle',
-      'do NOT crop wheels, roof, or any body panel of the vehicle',
-      'do NOT place text in the top 18% or bottom 18% of the canvas',
-      'the vehicle MUST have visible background space around it on all sides'
-    )
-  }
-
-  blocks.push(negativeBase.join(', '))
+  // ── 10. NEGATIVE ─────────────────────────────────────────────────
+  blocks.push(
+    'avoid: cropped product, oversized vehicle filling entire frame, ' +
+    'text outside safe margins, letters cut off at image border, ' +
+    'CTA near bottom UI zone, distorted typography, cluttered layout'
+  )
 
   return blocks.join(',\n')
 }
