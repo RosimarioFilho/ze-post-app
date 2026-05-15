@@ -230,11 +230,46 @@ export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
 
   // ── 7. TYPOGRAPHY BLOCK ──────────────────────────────────────────
   blocks.push(preset.typography)
-  blocks.push(typoPlace)
+
+  // typoPlace: os presets foram desenhados para 1:1/landscape.
+  // Em 9:16, as instruções como "left dark panel" ou "right side" são
+  // incoerentes — o layout vertical tem zonas próprias definidas nos blocos 1-2.
+  // Só injetamos o typoPlace se o formato for quadrado ou landscape.
+  if (!input.format || input.format.aspectRatio !== '9:16') {
+    blocks.push(typoPlace)
+  } else {
+    // Para 9:16: headline abaixo do produto, dentro da zona segura central
+    blocks.push(
+      'For this vertical 9:16 format: ' +
+      'place headline text BELOW the product in the lower safe zone (between 60% and 80% from top), ' +
+      'CTA below the headline near the bottom safe boundary, ' +
+      'text aligned center or left with at least 8% margin from both sides, ' +
+      'text must never overlap the product or extend beyond canvas edges'
+    )
+  }
+
   blocks.push('text must be perfectly legible, professional typesetting quality, no handwritten style, no distorted letters, no random fonts')
 
   // ── 8. ATMOSPHERE + LIGHTING BLOCK ──────────────────────────────
-  blocks.push(preset.composition)
+  // preset.composition: contém instruções como "hero vehicle filling 55% of frame"
+  // que foram escritas para formatos quadrados/landscape.
+  // Para 9:16, usar o preset.composition CONFLITA diretamente com as safe area rules
+  // dos blocos 1-3 (que limitam o produto a 45-52% da altura).
+  // Solução: para formatos verticais, substituímos por uma instrução neutra
+  // que defere às regras dos blocos anteriores.
+  if (!input.format || input.format.aspectRatio !== '9:16') {
+    blocks.push(preset.composition)
+  } else {
+    blocks.push(
+      'COMPOSITION FOR VERTICAL 9:16: ' +
+      'follow the layout composition rules defined above — ' +
+      'product fully visible in the upper-center zone, ' +
+      'scaled to fit without cropping, ' +
+      'surrounded by atmospheric depth background, ' +
+      'text zone clearly separated below the product'
+    )
+  }
+
   blocks.push('product and typography coexist without competing — clear visual hierarchy, product is hero, text is supporting element')
   blocks.push(preset.atmosphere)
   blocks.push(preset.lighting)
@@ -250,21 +285,36 @@ export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
 
   // ── 10. NEGATIVE PROMPT BLOCK ────────────────────────────────────
   // Instruções explícitas do que evitar — reforça as regras anteriores
-  blocks.push(
-    'AVOID ALL OF THE FOLLOWING: ' +
-    'no cropped product at any canvas edge, ' +
-    'no oversized vehicle or subject that fills the entire frame edge-to-edge, ' +
-    'no text placed outside the safe area margins, ' +
-    'no letters cut off or hidden at the image border, ' +
-    'no CTA positioned near the bottom platform UI zone, ' +
-    'no logo touching or overflowing any canvas border, ' +
-    'no product touching the canvas border directly, ' +
-    'no distorted or warped typography, ' +
-    'no cluttered layout with elements competing for attention, ' +
-    'no element overlapping the platform UI danger zones, ' +
-    'no generic stock image aesthetic, ' +
-    'no tight zoom crop that removes product context'
-  )
+  const negativeBase = [
+    'STRICTLY AVOID ALL OF THE FOLLOWING:',
+    'no cropped product at any canvas edge — the ENTIRE product must be visible',
+    'no vehicle or subject filling the ENTIRE frame edge-to-edge with no breathing room',
+    'no text placed outside the safe area margins',
+    'no letters cut off or hidden at the image border',
+    'no headline text that overflows beyond the right or left canvas edges',
+    'no CTA positioned near the bottom platform UI zone',
+    'no logo touching or overflowing any canvas border',
+    'no product body touching the canvas border directly',
+    'no distorted or warped typography',
+    'no cluttered layout with elements competing for attention',
+    'no element overlapping the platform UI danger zones',
+    'no generic stock image aesthetic',
+    'no tight zoom crop that removes product context and environment',
+  ]
+
+  // Reforço específico para 9:16
+  if (input.format?.aspectRatio === '9:16') {
+    negativeBase.push(
+      'VERTICAL FORMAT CRITICAL: do NOT fill the entire canvas height with the vehicle/product',
+      'do NOT place the vehicle so large it gets cropped at the top or sides of the canvas',
+      'do NOT put headline text overlapping the vehicle',
+      'do NOT crop wheels, roof, or any body panel of the vehicle',
+      'do NOT place text in the top 18% or bottom 18% of the canvas',
+      'the vehicle MUST have visible background space around it on all sides'
+    )
+  }
+
+  blocks.push(negativeBase.join(', '))
 
   return blocks.join(',\n')
 }

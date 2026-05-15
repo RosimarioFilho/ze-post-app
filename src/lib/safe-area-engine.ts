@@ -77,17 +77,17 @@ export function buildProductSafeAreaGuidance(format: SocialFormat): string {
   if (aspectRatio === '9:16') {
     // Formatos verticais — Stories, Reels, TikTok, WhatsApp
     lines.push(
-      'VERTICAL FORMAT: the hero product must be scaled to fit ENTIRELY within the canvas without any cropping',
-      'Position the product/hero fully visible in the central safe zone — vertically between 18% and 60% from the top',
-      'Keep at least 8% clear margin between the product and both left and right canvas edges',
-      'The product must NOT touch, bleed or overflow any canvas border — preserve complete subject visibility from all sides',
-      'Scale the product proportionally to fit the safe zone — DO NOT zoom in so close that the subject is cropped',
-      'If the subject is a vehicle: show the COMPLETE vehicle — front bumper, rear bumper, all four wheels, full roof — all visible with room around them',
-      'If the subject is a person: show the full body or at minimum from head to mid-thigh — never cut the face or torso',
-      'Product/hero should occupy maximum 45–52% of the total canvas HEIGHT in this vertical format',
-      'There must be visible atmosphere/background around the product on all sides — not a tight crop',
-      'Reserve the area below 60% from top as the text zone — headline, subheadline and CTA go here',
-      'Background behind the product creates cinematic depth and brand atmosphere without competing with the subject'
+      'VERTICAL 9:16 FORMAT — PRODUCT PLACEMENT CRITICAL RULES:',
+      'Rule 1: The complete product/vehicle MUST be fully visible — ALL edges of the subject must be inside the canvas with clear margin',
+      'Rule 2: DO NOT fill the entire canvas with the vehicle — the vehicle must be SMALLER than the canvas, not edge-to-edge',
+      'Rule 3: The product zone is the UPPER-CENTER area: place the product between 18% from top and 60% from top',
+      'Rule 4: Minimum 8% background margin between product edges and left/right canvas borders',
+      'Rule 5: Maximum product height = 42% of total canvas height — if the vehicle is taller, scale it DOWN',
+      'Rule 6: For a vehicle: ALL of the following must be clearly visible: front bumper, rear bumper, all four wheels, complete roof, both side mirrors',
+      'Rule 7: There MUST be visible background/atmosphere around ALL sides of the product',
+      'Rule 8: The LOWER 40% of the canvas (below the product) is reserved for headline, subline and CTA text',
+      'Rule 9: Think of the layout as: [empty top zone] [product zone centered] [text zone at bottom]',
+      'Rule 10: A smaller, complete product that fits properly is ALWAYS better than a large cropped one'
     )
   } else if (aspectRatio === '1:1') {
     // Formato quadrado
