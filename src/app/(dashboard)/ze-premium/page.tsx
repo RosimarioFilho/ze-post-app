@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback } from 'react'
-import { Upload, Sparkles, Download, RefreshCw, X, ImageIcon, Zap, Type, Monitor, ShieldCheck } from 'lucide-react'
+import { Upload, Sparkles, Download, RefreshCw, X, ImageIcon, Zap, Type, Monitor, ShieldCheck, ChevronLeft, ChevronRight, Layers } from 'lucide-react'
 import type { ZePremiumNiche, ZePremiumStyle } from '@/lib/ze-premium-prompt-builder'
 import { SOCIAL_FORMATS, type SocialFormatId } from '@/lib/social-formats'
 import type { SafeAreaScores } from '@/lib/safe-area-engine'
@@ -42,20 +42,51 @@ const LOADING_MESSAGES = [
   'Finalizando campanha publicitária...',
 ]
 
+const CAROUSEL_LOADING_MESSAGES = [
+  'Montando estratégia narrativa do carrossel...',
+  'Gerando slide Hook — criando o gancho...',
+  'Gerando slide de Desejo / Benefício...',
+  'Aplicando safe area em cada slide...',
+  'Gerando slide de Prova Social...',
+  'Finalizando slide de CTA...',
+  'Verificando consistência visual entre slides...',
+  'Quase pronto — compilando carrossel premium...',
+]
+
 // ── Tipos ──────────────────────────────────────────────────────
 
-interface GenerateResult {
-  imageBase64: string
-  mimeType: string
-  provider: string
-  prompt: string
-  formatId?: SocialFormatId
-  formatLabel?: string
-  safeAreaScores?: SafeAreaScores
+/** Resultado de um slide individual no carrossel */
+interface CarouselSlideResult {
+  slideNumber:      number
+  role:             string
+  roleLabel:        string
+  headline:         string
+  subline:          string
+  cta?:             string
+  imageBase64:      string
+  mimeType:         string
+  safeAreaScores?:  SafeAreaScores
   productSafeScore?: number
-  compositionMode?: LayoutCompositionMode
-  copyVariationId?: number
-  formatRiskLevel?: 'low' | 'medium' | 'high'
+}
+
+/** Resultado de geração — imagem única ou carrossel */
+interface GenerateResult {
+  // Imagem única
+  imageBase64?:      string
+  mimeType?:         string
+  provider?:         string
+  prompt?:           string
+  // Campos comuns
+  formatId?:         SocialFormatId
+  formatLabel?:      string
+  compositionMode?:  LayoutCompositionMode
+  formatRiskLevel?:  'low' | 'medium' | 'high'
+  safeAreaScores?:   SafeAreaScores
+  productSafeScore?: number
+  copyVariationId?:  number
+  // Carrossel
+  totalSlides?:      number
+  slides?:           CarouselSlideResult[]
 }
 
 interface UploadedImage {
@@ -150,30 +181,58 @@ function UploadZone({
 // ── Loading Card ───────────────────────────────────────────────
 
 function LoadingCard({ msgIndex, formatId }: { msgIndex: number; formatId: SocialFormatId }) {
-  const aspectCls = getAspectClass(formatId)
+  const aspectCls   = getAspectClass(formatId)
+  const isCarousel  = formatId === 'INSTAGRAM_CAROUSEL'
+  const messages    = isCarousel ? CAROUSEL_LOADING_MESSAGES : LOADING_MESSAGES
+
   return (
     <div className="rounded-2xl border border-white/8 bg-white/2 p-6 flex flex-col gap-5">
-      <div className={`relative w-full ${aspectCls} rounded-xl overflow-hidden bg-white/4`}>
-        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/8 to-transparent animate-shimmer" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-          <div className="relative">
-            <div className="w-16 h-16 rounded-2xl bg-violet-500/20 flex items-center justify-center">
-              <Sparkles className="w-8 h-8 text-violet-400 animate-pulse" />
+      {isCarousel ? (
+        // Loading especial para carrossel — mostra múltiplos quadros
+        <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-white/4">
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/8 to-transparent animate-shimmer" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+            <div className="relative">
+              <div className="w-16 h-16 rounded-2xl bg-violet-500/20 flex items-center justify-center">
+                <Layers className="w-8 h-8 text-violet-400 animate-pulse" />
+              </div>
+              <div className="absolute inset-0 rounded-2xl border-2 border-violet-400/30 animate-ping" />
             </div>
-            <div className="absolute inset-0 rounded-2xl border-2 border-violet-400/30 animate-ping" />
+            <p className="text-sm text-white/40 text-center px-4">
+              {messages[msgIndex % messages.length]}
+            </p>
           </div>
-          <p className="text-sm text-white/40 text-center px-4">
-            {LOADING_MESSAGES[msgIndex % LOADING_MESSAGES.length]}
-          </p>
         </div>
-      </div>
+      ) : (
+        <div className={`relative w-full ${aspectCls} rounded-xl overflow-hidden bg-white/4`}>
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/8 to-transparent animate-shimmer" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+            <div className="relative">
+              <div className="w-16 h-16 rounded-2xl bg-violet-500/20 flex items-center justify-center">
+                <Sparkles className="w-8 h-8 text-violet-400 animate-pulse" />
+              </div>
+              <div className="absolute inset-0 rounded-2xl border-2 border-violet-400/30 animate-ping" />
+            </div>
+            <p className="text-sm text-white/40 text-center px-4">
+              {messages[msgIndex % messages.length]}
+            </p>
+          </div>
+        </div>
+      )}
       <div className="space-y-2">
         <div className="flex justify-between text-xs text-white/25">
-          <span>Compondo arte com safe area aplicada...</span>
+          <span>
+            {isCarousel
+              ? 'Gerando slides com estratégia narrativa...'
+              : 'Compondo arte com safe area aplicada...'}
+          </span>
           <span className="animate-pulse">IA Multimodal</span>
         </div>
         <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-          <div className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full animate-progress" />
+          <div className={[
+            'h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full',
+            isCarousel ? 'animate-progress-slow' : 'animate-progress',
+          ].join(' ')} />
         </div>
       </div>
     </div>
@@ -203,7 +262,7 @@ function SafeScoreBadge({ scores }: { scores: SafeAreaScores }) {
 // ── Result Card ────────────────────────────────────────────────
 
 function ResultCard({ result, onRegenerate }: { result: GenerateResult; onRegenerate: () => void }) {
-  const dataUrl    = `data:${result.mimeType};base64,${result.imageBase64}`
+  const dataUrl    = `data:${result.mimeType ?? 'image/png'};base64,${result.imageBase64 ?? ''}`
   const formatId   = result.formatId ?? 'INSTAGRAM_POST'
   const aspectCls  = getAspectClass(formatId)
   const fmt        = SOCIAL_FORMATS[formatId]
@@ -240,9 +299,11 @@ function ResultCard({ result, onRegenerate }: { result: GenerateResult; onRegene
         )}
 
         <div className="absolute top-3 right-3 flex flex-col gap-2 items-end">
-          <span className="px-2 py-1 bg-black/60 backdrop-blur rounded-lg text-xs text-white/50 border border-white/10">
-            {result.provider}
-          </span>
+          {result.provider && (
+            <span className="px-2 py-1 bg-black/60 backdrop-blur rounded-lg text-xs text-white/50 border border-white/10">
+              {result.provider}
+            </span>
+          )}
           {result.safeAreaScores && (
             <SafeScoreBadge scores={result.safeAreaScores} />
           )}
@@ -292,6 +353,188 @@ function ResultCard({ result, onRegenerate }: { result: GenerateResult; onRegene
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-white/10 bg-white/5 text-white/60 text-sm font-medium hover:bg-white/8 transition-colors">
           <RefreshCw className="w-4 h-4" /> Gerar Variação
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Role badge colors ──────────────────────────────────────────
+
+const ROLE_COLORS: Record<string, string> = {
+  HOOK:           'bg-violet-500/20 text-violet-300 border-violet-400/30',
+  DESIRE:         'bg-pink-500/20 text-pink-300 border-pink-400/30',
+  PROBLEM:        'bg-orange-500/20 text-orange-300 border-orange-400/30',
+  BENEFIT:        'bg-emerald-500/20 text-emerald-300 border-emerald-400/30',
+  PROOF:          'bg-cyan-500/20 text-cyan-300 border-cyan-400/30',
+  DIFFERENTIAL:   'bg-blue-500/20 text-blue-300 border-blue-400/30',
+  OBJECTION:      'bg-yellow-500/20 text-yellow-300 border-yellow-400/30',
+  TIP:            'bg-teal-500/20 text-teal-300 border-teal-400/30',
+  COMPARISON:     'bg-indigo-500/20 text-indigo-300 border-indigo-400/30',
+  TRANSFORMATION: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-400/30',
+  CTA:            'bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 text-fuchsia-300 border-fuchsia-400/30',
+}
+
+// ── Carousel Result Card ───────────────────────────────────────
+
+function CarouselResultCard({
+  result, onRegenerate,
+}: {
+  result: GenerateResult
+  onRegenerate: () => void
+}) {
+  const [current, setCurrent] = useState(0)
+  const slides     = result.slides ?? []
+  const totalSlides = slides.length
+  const slide      = slides[current]
+
+  if (!slide) return null
+
+  const dataUrl    = `data:${slide.mimeType ?? 'image/png'};base64,${slide.imageBase64}`
+  const roleCls    = ROLE_COLORS[slide.role] ?? 'bg-white/10 text-white/50 border-white/20'
+
+  function downloadSlide(s: CarouselSlideResult, idx: number) {
+    const a = document.createElement('a')
+    a.href = `data:${s.mimeType ?? 'image/png'};base64,${s.imageBase64}`
+    a.download = `ze-premium-carousel-${idx + 1}-${s.role}-${Date.now()}.png`
+    a.click()
+  }
+
+  async function downloadAll() {
+    for (let i = 0; i < slides.length; i++) {
+      downloadSlide(slides[i], i)
+      // pequeno delay para o browser processar cada download
+      await new Promise(r => setTimeout(r, 350))
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/8 bg-white/2 overflow-hidden">
+
+      {/* Cabeçalho do carrossel */}
+      <div className="px-4 pt-4 pb-3 border-b border-white/6 flex items-center gap-2">
+        <Layers className="w-4 h-4 text-violet-400 flex-shrink-0" />
+        <span className="text-sm font-semibold text-white/70">Carrossel Estratégico</span>
+        <span className="ml-auto text-xs text-white/30">{totalSlides} slides</span>
+        {result.formatLabel && (
+          <span className="text-xs px-2 py-0.5 bg-white/6 rounded border border-white/8 text-white/40">
+            {result.formatLabel}
+          </span>
+        )}
+      </div>
+
+      {/* Preview do slide atual */}
+      <div className="relative aspect-square w-full">
+        <img
+          src={dataUrl}
+          alt={`Slide ${current + 1} — ${slide.roleLabel}`}
+          className="w-full h-full object-cover"
+        />
+
+        {/* Badge de papel do slide */}
+        <div className="absolute top-3 left-3">
+          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${roleCls}`}>
+            {slide.roleLabel}
+          </span>
+        </div>
+
+        {/* Badge de safe area */}
+        <div className="absolute top-3 right-3">
+          {slide.safeAreaScores && <SafeScoreBadge scores={slide.safeAreaScores} />}
+        </div>
+
+        {/* Indicador de slide */}
+        <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5">
+          {slides.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setCurrent(i)}
+              className={[
+                'rounded-full transition-all duration-200',
+                i === current
+                  ? 'w-5 h-1.5 bg-white'
+                  : 'w-1.5 h-1.5 bg-white/30 hover:bg-white/50',
+              ].join(' ')}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Copy do slide atual */}
+      <div className="px-4 pt-3 pb-2 space-y-1 border-b border-white/6">
+        <p className="text-sm font-semibold text-white/80 leading-snug">{slide.headline}</p>
+        <p className="text-xs text-white/40 leading-relaxed">{slide.subline}</p>
+        {slide.cta && (
+          <p className="text-xs font-semibold text-violet-400 mt-1">→ {slide.cta}</p>
+        )}
+      </div>
+
+      {/* Navegação */}
+      <div className="px-4 py-3 flex items-center gap-2">
+        <button
+          onClick={() => setCurrent(c => Math.max(0, c - 1))}
+          disabled={current === 0}
+          className="flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+
+        <div className="flex-1 text-center text-xs text-white/35 font-medium">
+          Slide {current + 1} de {totalSlides}
+        </div>
+
+        <button
+          onClick={() => setCurrent(c => Math.min(totalSlides - 1, c + 1))}
+          disabled={current === totalSlides - 1}
+          className="flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Score do slide atual */}
+      {slide.safeAreaScores && (
+        <div className="px-4 pb-3">
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {[
+              { label: 'Headline',   score: slide.safeAreaScores.headline_safe_score },
+              { label: 'CTA',        score: slide.safeAreaScores.cta_safe_score },
+              ...(slide.productSafeScore !== undefined
+                ? [{ label: 'Produto', score: slide.productSafeScore }]
+                : []),
+            ].map(({ label, score }) => (
+              <div key={label} className="flex items-center justify-between px-2 py-1 bg-white/4 rounded-lg">
+                <span className="text-white/35">{label}</span>
+                <span className={score >= 85 ? 'text-emerald-400' : score >= 70 ? 'text-yellow-400' : 'text-red-400'}>
+                  {score}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Botões de download */}
+      <div className="px-4 pb-4 space-y-2">
+        <button
+          onClick={() => downloadSlide(slide, current)}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-semibold text-sm hover:opacity-90 transition-opacity"
+        >
+          <Download className="w-4 h-4" /> Baixar slide {current + 1}
+        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={downloadAll}
+            className="flex items-center justify-center gap-1.5 py-2 rounded-xl border border-white/10 bg-white/5 text-white/55 text-xs font-medium hover:bg-white/10 transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" /> Baixar todos
+          </button>
+          <button
+            onClick={onRegenerate}
+            className="flex items-center justify-center gap-1.5 py-2 rounded-xl border border-white/10 bg-white/5 text-white/55 text-xs font-medium hover:bg-white/10 transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Regerar
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -410,7 +653,15 @@ export default function ZePremiumPage() {
                   </option>
                 ))}
               </select>
-              {currentFmt.dangerZoneIds.length > 0 ? (
+              {currentFmt.id === 'INSTAGRAM_CAROUSEL' ? (
+                <div className="flex items-start gap-2 px-3 py-2.5 bg-violet-500/8 border border-violet-500/20 rounded-xl">
+                  <Layers className="w-3.5 h-3.5 text-violet-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-violet-300/70">
+                    Modo carrossel ativo — o sistema vai gerar múltiplos slides com estratégia narrativa (Hook → Benefício → CTA).
+                    Para personalizar a quantidade, escreva "carrossel de X slides" no campo Contexto abaixo (3 a 10 slides).
+                  </p>
+                </div>
+              ) : currentFmt.dangerZoneIds.length > 0 ? (
                 <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-500/8 border border-amber-500/20 rounded-xl">
                   <ShieldCheck className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-amber-300/70">
@@ -528,7 +779,11 @@ export default function ZePremiumPage() {
                   Contexto / Objetivo <span className="text-white/20">(opcional)</span>
                 </label>
                 <textarea value={objective} onChange={e => setObjective(e.target.value)}
-                  placeholder="Ex: Lançamento do Fiorino 2026 para pequenos empresários — foco em economia e robustez"
+                  placeholder={
+                    formatId === 'INSTAGRAM_CAROUSEL'
+                      ? 'Ex: Carrossel de 5 slides para lançamento da Toro 2026 — foco em força e tecnologia'
+                      : 'Ex: Lançamento do Fiorino 2026 para pequenos empresários — foco em economia e robustez'
+                  }
                   rows={2}
                   className={inputCls + ' resize-none'}
                 />
@@ -554,8 +809,14 @@ export default function ZePremiumPage() {
                   : 'bg-white/5 border border-white/8 text-white/25 cursor-not-allowed',
               ].join(' ')}
             >
-              <Sparkles className={['w-5 h-5', loading ? 'animate-spin' : ''].join(' ')} />
-              {loading ? 'Gerando arte com safe area...' : 'Gerar Arte Premium'}
+              {formatId === 'INSTAGRAM_CAROUSEL'
+                ? <Layers className={['w-5 h-5', loading ? 'animate-spin' : ''].join(' ')} />
+                : <Sparkles className={['w-5 h-5', loading ? 'animate-spin' : ''].join(' ')} />
+              }
+              {loading
+                ? (formatId === 'INSTAGRAM_CAROUSEL' ? 'Gerando carrossel estratégico...' : 'Gerando arte com safe area...')
+                : (formatId === 'INSTAGRAM_CAROUSEL' ? 'Gerar Carrossel Estratégico' : 'Gerar Arte Premium')
+              }
             </button>
           </div>
 
@@ -563,17 +824,27 @@ export default function ZePremiumPage() {
           <div className="lg:sticky lg:top-6">
             {loading ? (
               <LoadingCard msgIndex={msgIndex} formatId={formatId} />
+            ) : result?.slides?.length ? (
+              <CarouselResultCard result={result} onRegenerate={handleGenerate} />
             ) : result ? (
               <ResultCard result={result} onRegenerate={handleGenerate} />
             ) : (
               <div className={`rounded-2xl border border-white/6 bg-white/2 ${getAspectClass(formatId)} flex flex-col items-center justify-center gap-4 text-center p-8`}>
                 <div className="w-16 h-16 rounded-2xl bg-white/4 flex items-center justify-center">
-                  <Sparkles className="w-8 h-8 text-white/15" />
+                  {formatId === 'INSTAGRAM_CAROUSEL'
+                    ? <Layers className="w-8 h-8 text-white/15" />
+                    : <Sparkles className="w-8 h-8 text-white/15" />
+                  }
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-white/25">Sua arte premium</p>
+                  <p className="text-sm font-semibold text-white/25">
+                    {formatId === 'INSTAGRAM_CAROUSEL' ? 'Seu carrossel estratégico' : 'Sua arte premium'}
+                  </p>
                   <p className="text-xs text-white/12 mt-1">
-                    Escolha o formato, preencha headline<br />e clique em Gerar Arte Premium
+                    {formatId === 'INSTAGRAM_CAROUSEL'
+                      ? <>Preencha headline e objetivo,<br />clique em Gerar Carrossel</>
+                      : <>Escolha o formato, preencha headline<br />e clique em Gerar Arte Premium</>
+                    }
                   </p>
                 </div>
               </div>
@@ -598,6 +869,7 @@ export default function ZePremiumPage() {
         }
         .animate-shimmer { animation: shimmer 2s infinite }
         .animate-progress { animation: progress 90s ease-out forwards }
+        .animate-progress-slow { animation: progress 240s ease-out forwards }
       `}</style>
     </div>
   )
