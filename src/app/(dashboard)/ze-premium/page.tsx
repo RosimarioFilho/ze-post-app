@@ -6,6 +6,7 @@ import type { ZePremiumNiche, ZePremiumStyle } from '@/lib/ze-premium-prompt-bui
 import { SOCIAL_FORMATS, type SocialFormatId } from '@/lib/social-formats'
 import type { SafeAreaScores } from '@/lib/safe-area-engine'
 import type { LayoutCompositionMode } from '@/lib/layout-composition-engine'
+import { getTextOverlayPreviewStyles, drawTextOnCanvas, type CopyData } from '@/lib/text-overlay-engine'
 
 // ── Opções ────────────────────────────────────────────────────
 
@@ -79,11 +80,14 @@ interface GenerateResult {
   // Campos comuns
   formatId?:         SocialFormatId
   formatLabel?:      string
+  styleId?:          ZePremiumStyle
   compositionMode?:  LayoutCompositionMode
   formatRiskLevel?:  'low' | 'medium' | 'high'
   safeAreaScores?:   SafeAreaScores
   productSafeScore?: number
   copyVariationId?:  number
+  // Copy — renderizado pelo text-overlay-engine
+  copyData?:         CopyData
   // Carrossel
   totalSlides?:      number
   slides?:           CarouselSlideResult[]
@@ -259,24 +263,89 @@ function SafeScoreBadge({ scores }: { scores: SafeAreaScores }) {
   )
 }
 
+// ── Download com texto composto via Canvas 2D ──────────────────────
+// Carrega a imagem base64, desenha o texto em cima com canvas nativo,
+// sem depender de html2canvas — funciona na resolução real do modelo.
+
+async function downloadWithTextOverlay(
+  imageBase64: string,
+  mimeType:    string,
+  formatId:    SocialFormatId,
+  styleId:     ZePremiumStyle,
+  copy:        CopyData,
+  filename:    string,
+) {
+  const img = new Image()
+  await new Promise<void>((res, rej) => {
+    img.onload  = () => res()
+    img.onerror = rej
+    img.src = `data:${mimeType};base64,${imageBase64}`
+  })
+
+  const canvas = document.createElement('canvas')
+  canvas.width  = img.naturalWidth
+  canvas.height = img.naturalHeight
+
+  const ctx = canvas.getContext('2d')!
+  ctx.drawImage(img, 0, 0)
+  drawTextOnCanvas(ctx, canvas.width, canvas.height, formatId, styleId, copy)
+
+  const link = document.createElement('a')
+  link.download = filename
+  link.href     = canvas.toDataURL('image/png')
+  link.click()
+}
+
 // ── Result Card ────────────────────────────────────────────────
 
 function ResultCard({ result, onRegenerate }: { result: GenerateResult; onRegenerate: () => void }) {
   const dataUrl    = `data:${result.mimeType ?? 'image/png'};base64,${result.imageBase64 ?? ''}`
   const formatId   = result.formatId ?? 'INSTAGRAM_POST'
+  const styleId    = result.styleId  ?? 'premium_dark'
   const aspectCls  = getAspectClass(formatId)
   const fmt        = SOCIAL_FORMATS[formatId]
   const isVertical = fmt?.genH > fmt?.genW
 
-  function handleDownload() {
-    const a = document.createElement('a')
-    a.href = dataUrl; a.download = `ze-premium-${formatId}-${Date.now()}.png`; a.click()
+  // CSS overlay para preview
+  const overlayStyles = result.copyData
+    ? getTextOverlayPreviewStyles(formatId, styleId)
+    : null
+  const copy = result.copyData ?? null
+
+  async function handleDownload() {
+    if (!result.imageBase64 || !copy) {
+      // Fallback: download da imagem sem texto
+      const a = document.createElement('a')
+      a.href = dataUrl; a.download = `ze-premium-${formatId}-${Date.now()}.png`; a.click()
+      return
+    }
+    await downloadWithTextOverlay(
+      result.imageBase64,
+      result.mimeType ?? 'image/png',
+      formatId,
+      styleId,
+      copy,
+      `ze-premium-${formatId}-${Date.now()}.png`,
+    )
   }
 
   return (
     <div className="rounded-2xl border border-white/8 bg-white/2 overflow-hidden">
-      <div className={`relative ${aspectCls} w-full`}>
+      <div className={`relative ${aspectCls} w-full`} style={{ containerType: 'inline-size' }}>
         <img src={dataUrl} alt="Arte premium gerada" className="w-full h-full object-cover" />
+
+        {/* ── Text overlay — posicionado via text-overlay-engine ── */}
+        {overlayStyles && copy && (
+          <div style={overlayStyles.container}>
+            <p style={{ ...overlayStyles.headline, margin: 0 }}>{copy.headline}</p>
+            {copy.subheadline && (
+              <p style={{ ...overlayStyles.subline, margin: 0 }}>{copy.subheadline}</p>
+            )}
+            {copy.cta && (
+              <span style={overlayStyles.cta}>{copy.cta}</span>
+            )}
+          </div>
+        )}
 
         {/* Safe area overlay — apenas formatos verticais com danger zones */}
         {isVertical && fmt?.dangerZoneIds?.length > 0 && (
@@ -383,27 +452,41 @@ function CarouselResultCard({
   onRegenerate: () => void
 }) {
   const [current, setCurrent] = useState(0)
-  const slides     = result.slides ?? []
+  const slides      = result.slides ?? []
   const totalSlides = slides.length
-  const slide      = slides[current]
+  const slide       = slides[current]
+  const styleId     = result.styleId ?? 'premium_dark'
+  const formatId    = (result.formatId ?? 'INSTAGRAM_CAROUSEL') as SocialFormatId
 
   if (!slide) return null
 
-  const dataUrl    = `data:${slide.mimeType ?? 'image/png'};base64,${slide.imageBase64}`
-  const roleCls    = ROLE_COLORS[slide.role] ?? 'bg-white/10 text-white/50 border-white/20'
+  const dataUrl = `data:${slide.mimeType ?? 'image/png'};base64,${slide.imageBase64}`
+  const roleCls = ROLE_COLORS[slide.role] ?? 'bg-white/10 text-white/50 border-white/20'
 
-  function downloadSlide(s: CarouselSlideResult, idx: number) {
-    const a = document.createElement('a')
-    a.href = `data:${s.mimeType ?? 'image/png'};base64,${s.imageBase64}`
-    a.download = `ze-premium-carousel-${idx + 1}-${s.role}-${Date.now()}.png`
-    a.click()
+  // CSS overlay para o slide atual
+  const overlayStyles = getTextOverlayPreviewStyles(formatId, styleId)
+  const slideCopy: CopyData = {
+    headline:    slide.headline,
+    subheadline: slide.subline ?? null,
+    cta:         slide.cta    ?? null,
+  }
+
+  async function downloadSlide(s: CarouselSlideResult, idx: number) {
+    const copy: CopyData = { headline: s.headline, subheadline: s.subline ?? null, cta: s.cta ?? null }
+    await downloadWithTextOverlay(
+      s.imageBase64,
+      s.mimeType ?? 'image/png',
+      formatId,
+      styleId,
+      copy,
+      `ze-premium-carousel-${idx + 1}-${s.role}-${Date.now()}.png`,
+    )
   }
 
   async function downloadAll() {
     for (let i = 0; i < slides.length; i++) {
-      downloadSlide(slides[i], i)
-      // pequeno delay para o browser processar cada download
-      await new Promise(r => setTimeout(r, 350))
+      await downloadSlide(slides[i], i)
+      await new Promise(r => setTimeout(r, 400))
     }
   }
 
@@ -423,12 +506,23 @@ function CarouselResultCard({
       </div>
 
       {/* Preview do slide atual */}
-      <div className="relative aspect-square w-full">
+      <div className="relative aspect-square w-full" style={{ containerType: 'inline-size' }}>
         <img
           src={dataUrl}
           alt={`Slide ${current + 1} — ${slide.roleLabel}`}
           className="w-full h-full object-cover"
         />
+
+        {/* ── Text overlay do slide ── */}
+        <div style={overlayStyles.container}>
+          <p style={{ ...overlayStyles.headline, margin: 0 }}>{slideCopy.headline}</p>
+          {slideCopy.subheadline && (
+            <p style={{ ...overlayStyles.subline, margin: 0 }}>{slideCopy.subheadline}</p>
+          )}
+          {slideCopy.cta && (
+            <span style={overlayStyles.cta}>{slideCopy.cta}</span>
+          )}
+        </div>
 
         {/* Badge de papel do slide */}
         <div className="absolute top-3 left-3">
@@ -516,7 +610,7 @@ function CarouselResultCard({
       {/* Botões de download */}
       <div className="px-4 pb-4 space-y-2">
         <button
-          onClick={() => downloadSlide(slide, current)}
+          onClick={() => void downloadSlide(slide, current)}
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-semibold text-sm hover:opacity-90 transition-opacity"
         >
           <Download className="w-4 h-4" /> Baixar slide {current + 1}
@@ -624,7 +718,7 @@ export default function ZePremiumPage() {
             <span className="bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">Premium</span>
           </h1>
           <p className="mt-2 text-white/35 text-sm max-w-lg mx-auto">
-            Gera headline, subheadline e CTA diretamente na arte — com safe area oficial de cada plataforma.
+            Produto gerado pelo modelo, texto renderizado com precisão Canvas — resultado perfeito em qualquer formato.
           </p>
         </div>
 
@@ -733,14 +827,14 @@ export default function ZePremiumPage() {
               </div>
             </div>
 
-            {/* Copy — tipografia integrada na arte */}
+            {/* Copy — overlay preciso sobre a imagem gerada */}
             <div className="rounded-2xl border border-violet-500/15 bg-violet-500/5 p-5 space-y-4">
               <div className="flex items-center gap-2">
                 <Type className="w-4 h-4 text-violet-400" />
-                <h2 className="text-sm font-semibold text-white/70">Copy — tipografia integrada na arte</h2>
+                <h2 className="text-sm font-semibold text-white/70">Copy da Arte</h2>
               </div>
               <p className="text-xs text-white/30 -mt-1">
-                Os textos abaixo serão renderizados diretamente pelo modelo de IA dentro da imagem, respeitando a safe area do formato selecionado.
+                O texto é renderizado com precisão pixel sobre a imagem — sem distorção, sem corte, exatamente como você digitou. O download já inclui a composição final.
               </p>
 
               <div>

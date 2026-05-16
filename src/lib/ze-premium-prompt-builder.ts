@@ -1,20 +1,18 @@
 // ── Zé Premium — Prompt Builder ───────────────────────────────────────
-// Gera prompts multimodais que instruem o modelo a compor headline,
-// subheadline e CTA diretamente dentro da imagem gerada.
-// Sem overlay, sem HTML, sem composição posterior.
+// Gera prompts visuais para o modelo multimodal.
+// O texto (headline, CTA) é renderizado via CSS overlay + Canvas 2D
+// no frontend — NÃO mais pedido ao modelo de imagem.
 //
 // Ordem dos blocos:
-//   0. FORMAT + TEXT SAFE AREA
+//   0. FORMAT + SAFE AREA
 //   1. PRODUCT / HERO SAFE AREA
 //   2. LAYOUT COMPOSITION MODE
 //   3. STYLE BLOCK
 //   4. PRODUCT / NICHE BLOCK
 //   5. MOOD + OBJECTIVE BLOCK
-//   6. COPY BLOCK (headline, subheadline, CTA)
-//   7. TYPOGRAPHY BLOCK
-//   8. ATMOSPHERE + LIGHTING BLOCK
-//   9. QUALITY BLOCK
-//  10. NEGATIVE PROMPT BLOCK
+//   6. ATMOSPHERE + LIGHTING BLOCK
+//   7. QUALITY BLOCK
+//   8. NEGATIVE PROMPT BLOCK
 
 import type { SocialFormat } from './social-formats'
 import { buildSafeAreaGuidance, buildProductSafeAreaGuidance } from './safe-area-engine'
@@ -152,9 +150,8 @@ export interface ZePremiumPromptInput {
   objective: string
   niche: ZePremiumNiche
   style: ZePremiumStyle
-  headline: string
-  subheadline?: string
-  cta?: string
+  // headline/subheadline/cta já NÃO são mais injetados no prompt do modelo —
+  // são renderizados via text-overlay-engine no frontend.
   hasProductImage: boolean
   format?: SocialFormat   // formato da mídia — define safe area e dimensões
 }
@@ -174,23 +171,12 @@ export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
 }
 
 // ── Prompt para formatos verticais 9:16 ──────────────────────────────
-// Estratégia: CURTO, analogia visual, layout descrito narrativamente.
-// O layout é a PRIMEIRA coisa — não enterrado no bloco 7.
+// Estratégia: curto, analogia visual, SEM pedido de texto.
+// O texto é renderizado via text-overlay-engine no frontend.
 function buildVertical916Prompt(input: ZePremiumPromptInput): string {
   const preset     = STYLE_PRESETS[input.style] ?? STYLE_PRESETS.premium_dark
   const nicheBoost = NICHE_BOOSTERS[input.niche] ?? ''
   const platform   = input.format?.label ?? 'Instagram Stories'
-
-  // Bloco de copy da arte
-  const copyLines: string[] = [
-    `bold advertising headline text rendered inside the image reading exactly: "${input.headline}"`,
-  ]
-  if (input.subheadline?.trim()) {
-    copyLines.push(`subheadline text below reading exactly: "${input.subheadline}"`)
-  }
-  if (input.cta?.trim()) {
-    copyLines.push(`CTA button at bottom reading exactly: "${input.cta}"`)
-  }
 
   // Referência ao produto
   const productRef = input.hasProductImage
@@ -199,11 +185,11 @@ function buildVertical916Prompt(input: ZePremiumPromptInput): string {
 
   const parts: string[] = [
 
-    // ── 1. LAYOUT — primeiro e mais importante ──────────────────────
-    // Analogia visual simples: "magazine cover layout"
+    // ── 1. LAYOUT — analogia visual que o modelo reconhece ─────────
     `A premium vertical ${platform} advertisement designed like a luxury magazine cover or professional car dealer poster: ` +
-    `the upper half of the image shows the complete product centered against a dramatic atmospheric background (the entire product fits inside the image with visible space around it), ` +
-    `and the lower half shows the advertising text block with headline and CTA clearly readable`,
+    `the upper two-thirds of the image shows the complete product centered against a dramatic atmospheric background ` +
+    `(the entire product fits inside the image with clear space around it), ` +
+    `and the lower third has a clean dark atmospheric gradient area`,
 
     // ── 2. Produto ─────────────────────────────────────────────────
     `Product shown as a full product shot — the complete object with all sides visible, nothing cropped, ` +
@@ -216,18 +202,12 @@ function buildVertical916Prompt(input: ZePremiumPromptInput): string {
     preset.atmosphere,
     preset.lighting,
 
-    // ── 4. Copy integrada na imagem ────────────────────────────────
-    copyLines.join(', '),
-    `${preset.typography}, text placed in the lower section of the image, fully inside the frame`,
-    `text uses a premium accent color that harmonizes with the scene — warm ivory, gold or white on dark backgrounds`,
-
-    // ── 5. Qualidade ───────────────────────────────────────────────
+    // ── 4. Qualidade ───────────────────────────────────────────────
     preset.quality,
-    `complete professional advertising artwork for ${platform}, all text legible, no distorted letters`,
+    `complete professional advertising background for ${platform}, no text rendered in the image`,
 
-    // ── 6. Negativo — curto e direto ───────────────────────────────
-    `avoid: cropped product, vehicle filling entire frame, wheels or roof cut off, ` +
-    `text overlapping the product, text outside the image borders, letters cut at edges`,
+    // ── 5. Negativo ────────────────────────────────────────────────
+    `avoid: cropped product, vehicle filling entire frame, wheels or roof cut off, any text or letters in the image`,
   ]
 
   return parts.join(',\n')
@@ -237,7 +217,6 @@ function buildVertical916Prompt(input: ZePremiumPromptInput): string {
 function buildStandardPrompt(input: ZePremiumPromptInput): string {
   const preset     = STYLE_PRESETS[input.style] ?? STYLE_PRESETS.premium_dark
   const nicheBoost = NICHE_BOOSTERS[input.niche] ?? ''
-  const typoPlace  = TYPOGRAPHY_PLACEMENT[input.style] ?? ''
 
   const blocks: string[] = []
 
@@ -273,46 +252,28 @@ function buildStandardPrompt(input: ZePremiumPromptInput): string {
     blocks.push(`campaign message: ${input.objective}`)
   }
 
-  // ── 6. COPY ──────────────────────────────────────────────────────
-  const copyParts: string[] = []
-  copyParts.push(`large bold advertising headline rendered directly in the image saying exactly: "${input.headline}"`)
-  if (input.subheadline?.trim()) {
-    copyParts.push(`smaller premium subheadline below saying exactly: "${input.subheadline}"`)
-  }
-  if (input.cta?.trim()) {
-    copyParts.push(`modern premium CTA element at the bottom saying exactly: "${input.cta}"`)
-  }
-  copyParts.push(
-    'headline accent color harmonizes with the artwork palette — ' +
-    'warm ivory, gold or white on dark backgrounds for strong readability'
-  )
-  blocks.push(copyParts.join(', '))
-
-  // ── 7. TYPOGRAPHY + PLACEMENT ────────────────────────────────────
-  blocks.push(preset.typography)
-  blocks.push(typoPlace)
-  blocks.push('text perfectly legible, professional typesetting, no distorted letters')
-
-  // ── 8. COMPOSITION + ATMOSPHERE ──────────────────────────────────
+  // ── 6. ATMOSPHERE + LIGHTING ─────────────────────────────────────
   blocks.push(preset.composition)
-  blocks.push('product and typography coexist without competing — product is hero, text is supporting')
   blocks.push(preset.atmosphere)
   blocks.push(preset.lighting)
+  // Reservar área limpa no lado esquerdo/inferior para overlay de texto
+  blocks.push(
+    'the left third or lower area of the composition should have a clean dark atmospheric gradient ' +
+    'that allows text to be overlaid with high readability — no busy details in that zone'
+  )
 
-  // ── 9. QUALITY ───────────────────────────────────────────────────
+  // ── 7. QUALITY ───────────────────────────────────────────────────
   blocks.push(preset.quality)
   const platformLabel = input.format?.label ?? 'Instagram'
   blocks.push(
-    `complete advertising piece ready for ${platformLabel}, ` +
-    'professional campaign quality, photorealistic render, no lorem ipsum, ' +
-    'all text within safe composition area'
+    `complete advertising visual background for ${platformLabel}, ` +
+    'professional campaign quality, photorealistic render, no text rendered in the image'
   )
 
-  // ── 10. NEGATIVE ─────────────────────────────────────────────────
+  // ── 8. NEGATIVE ──────────────────────────────────────────────────
   blocks.push(
     'avoid: cropped product, oversized vehicle filling entire frame, ' +
-    'text outside safe margins, letters cut off at image border, ' +
-    'CTA near bottom UI zone, distorted typography, cluttered layout'
+    'any text or letters or typography rendered inside the image, cluttered busy layout'
   )
 
   return blocks.join(',\n')

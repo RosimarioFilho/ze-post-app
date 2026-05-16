@@ -136,9 +136,6 @@ export async function POST(req: NextRequest) {
       objective: objective ?? '',
       niche:     niche ?? 'corporativo',
       style:     style ?? 'premium_dark',
-      headline,
-      subheadline,
-      cta,
       hasProductImage: !!productImageBase64,
       format,
     })
@@ -173,11 +170,18 @@ export async function POST(req: NextRequest) {
       prompt,
       formatId:    format.id,
       formatLabel: format.label,
+      styleId:     style ?? 'premium_dark',
       safeAreaScores,
       productSafeScore,
       compositionMode,
       copyVariationId,
       formatRiskLevel: safeAreaScores.risk_level,
+      // Copy devolvido para o frontend renderizar via text-overlay-engine
+      copyData: {
+        headline:    headline ?? '',
+        subheadline: subheadline ?? null,
+        cta:         cta ?? null,
+      },
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

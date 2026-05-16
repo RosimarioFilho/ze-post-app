@@ -650,13 +650,12 @@ export function buildCarouselSlidePrompt(
   ].join(',\n')
 
   // ── Prompt base — reutiliza todo o sistema de safe area e estilo
+  // Nota: headline/subheadline/cta foram removidos do prompt do modelo;
+  // são renderizados via text-overlay-engine no frontend.
   const basePrompt = buildZePremiumPrompt({
     objective,
     niche,
     style,
-    headline:    slide.headline,
-    subheadline: slide.subline,
-    cta:         slide.cta,
     hasProductImage,
     format,
   })
