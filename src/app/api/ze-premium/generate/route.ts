@@ -8,7 +8,7 @@ import {
   buildCarouselStrategy,
   buildCarouselSlidePrompt,
 } from '@/lib/carousel-strategy-engine'
-import { generateImage } from '@/lib/imageProvider'
+import { generateImage, generateImage916 } from '@/lib/imageProvider'
 
 // Carrosséis com muitos slides precisam de mais tempo
 export const maxDuration = 300
@@ -140,21 +140,20 @@ export async function POST(req: NextRequest) {
       format,
     })
 
+    const isVertical9x16 = format.aspectRatio === '9:16'
+
     console.log(
       `[ze-premium] Gerando arte — format=${format.id} niche=${niche} style=${style} ` +
-      `headline="${headline}" hasProduct=${!!productImageBase64} ` +
-      `genSize=${format.genW}x${format.genH}`
+      `hasProduct=${!!productImageBase64} genSize=${format.genW}x${format.genH} ` +
+      `provider=${isVertical9x16 ? 'Fal.ai Flux (9:16)' : 'gpt-image-1'}`
     )
     console.log(`[ze-premium] Prompt: ${prompt.slice(0, 300)}...`)
 
-    const result = await generateImage(
-      prompt,
-      'post_instagram',
-      format.genW,
-      format.genH,
-      productImageBase64,
-      mimeArg,
-    )
+    // 9:16 → Fal.ai Flux Pro (especializado em portrait, gpt-image-1 não suporta 9:16 confiável)
+    // Outros formatos → fluxo padrão (gpt-image-1 para feed, carrossel, wide)
+    const result = isVertical9x16
+      ? await generateImage916(prompt, productImageBase64, mimeArg)
+      : await generateImage(prompt, 'post_instagram', format.genW, format.genH, productImageBase64, mimeArg)
 
     console.log(`[ze-premium] Arte gerada via ${result.provider} (${format.genW}×${format.genH})`)
 

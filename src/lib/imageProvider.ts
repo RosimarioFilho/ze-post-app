@@ -238,6 +238,41 @@ export async function generateImage(
   throw new NoProviderError()
 }
 
+// ── Geração especializada para 9:16 vertical (Stories / Reels) ───────
+// OpenAI gpt-image-1 NÃO suporta portrait 9:16 de forma confiável.
+// Esta função força Fal.ai Flux Pro como provider primário para formatos
+// verticais, garantindo dimensões corretas e composição portrait de qualidade.
+//
+// Hierarquia de fallback:
+//   1. Fal.ai Flux Pro / Kontext (melhor para portrait 9:16)
+//   2. Gemini Imagen 3 (suporte nativo a 9:16)
+//   3. Ideogram v2 (aspect ratio explícito)
+//   4. OpenAI gpt-image-1 (último recurso — qualidade limitada em portrait)
+
+export async function generateImage916(
+  prompt:        string,
+  productBase64?: string,
+  productMime?:  string,
+): Promise<ImageResult> {
+  // Dimensões para 9:16 portrait — Fal.ai suporta arbitrary sizes
+  const W = 1024
+  const H = 1792
+
+  // 1. Fal.ai: melhor qualidade em portrait, suporta Kontext para produto
+  if (process.env.FAL_KEY) return falImageGen(prompt, W, H, productBase64)
+
+  // 2. Gemini Imagen 3: suporte nativo a 9:16
+  if (process.env.GEMINI_IMAGE_API_KEY) return geminiImageGen(prompt, '9:16')
+
+  // 3. Ideogram: aspect ratio explícito 9:16
+  if (process.env.IDEOGRAM_API_KEY) return ideogramImageGen(prompt, 'ASPECT_9_16')
+
+  // 4. OpenAI último recurso — usa portrait (1024x1536) mas com limitações conhecidas
+  if (process.env.OPENAI_API_KEY) return openaiImageGen(prompt, '1024x1792', productBase64, productMime)
+
+  throw new NoProviderError()
+}
+
 // ── Upload to Supabase Storage ────────────────────────────────
 
 export async function uploadGeneratedImage(

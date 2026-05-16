@@ -159,9 +159,8 @@ export interface ZePremiumPromptInput {
 export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
   const isVertical = input.format?.aspectRatio === '9:16'
 
-  // Formatos verticais usam uma estratégia de prompt completamente diferente.
-  // Modelos de geração de imagem respondem a analogias visuais curtas,
-  // NÃO a longas listas de regras técnicas com percentuais.
+  // 9:16 → prompt dedicado para Fal.ai Flux Pro (composição vertical nativa).
+  // Não usa gpt-image-1 (limitações conhecidas com portrait).
   if (isVertical) {
     return buildVertical916Prompt(input)
   }
@@ -170,9 +169,9 @@ export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
   return buildStandardPrompt(input)
 }
 
-// ── Prompt para formatos verticais 9:16 ──────────────────────────────
-// Estratégia: curto, analogia visual, SEM pedido de texto.
-// O texto é renderizado via text-overlay-engine no frontend.
+// ── Prompt para formatos verticais 9:16 (Fal.ai Flux Pro) ────────────
+// Gerado para o Flux Pro via fal.ai — modelo que lida bem com portrait
+// e composição vertical. SEM texto no prompt (renderizado via Canvas 2D).
 function buildVertical916Prompt(input: ZePremiumPromptInput): string {
   const preset     = STYLE_PRESETS[input.style] ?? STYLE_PRESETS.premium_dark
   const nicheBoost = NICHE_BOOSTERS[input.niche] ?? ''
@@ -180,37 +179,44 @@ function buildVertical916Prompt(input: ZePremiumPromptInput): string {
 
   // Referência ao produto
   const productRef = input.hasProductImage
-    ? 'using the provided product reference image — preserve exact colors, shape and proportions, do not modify the product'
+    ? 'faithfully recreate the provided product — preserve all colors, shape, proportions and details exactly as in the reference'
     : nicheBoost
 
   const parts: string[] = [
 
-    // ── 1. LAYOUT — analogia visual que o modelo reconhece ─────────
-    `A premium vertical ${platform} advertisement designed like a luxury magazine cover or professional car dealer poster: ` +
-    `the upper two-thirds of the image shows the complete product centered against a dramatic atmospheric background ` +
-    `(the entire product fits inside the image with clear space around it), ` +
-    `and the lower third has a clean dark atmospheric gradient area`,
+    // ── 1. FORMATO + CONTEXTO ───────────────────────────────────────
+    `Tall vertical 9:16 portrait ${platform} premium advertising image`,
 
-    // ── 2. Produto ─────────────────────────────────────────────────
-    `Product shown as a full product shot — the complete object with all sides visible, nothing cropped, ` +
-    `similar to how a product appears on a premium dealership catalog or magazine feature page, ` +
+    // ── 2. LAYOUT (Flux entende composição vertical melhor) ─────────
+    `Three-zone vertical layout: ` +
+    `[ZONE A — top 15% of frame: empty clean space, no product, no text] ` +
+    `[ZONE B — center of frame 15% to 62%: the complete product floating centered, ` +
+    `fully visible with all sides inside the frame, surrounded by atmospheric depth] ` +
+    `[ZONE C — bottom 38%: deep dark atmospheric gradient with no product overlap, ` +
+    `clean space for text overlay]`,
+
+    // ── 3. Produto ─────────────────────────────────────────────────
+    `The product occupies roughly one third of the total image height — ` +
+    `sized proportionally to fit entirely in Zone B with visible breathing space on all sides, ` +
     productRef,
 
-    // ── 3. Estilo visual ───────────────────────────────────────────
+    // ── 4. Estilo visual ───────────────────────────────────────────
     preset.style,
     preset.mood,
     preset.atmosphere,
     preset.lighting,
 
-    // ── 4. Qualidade ───────────────────────────────────────────────
+    // ── 5. Qualidade ───────────────────────────────────────────────
     preset.quality,
-    `complete professional advertising background for ${platform}, no text rendered in the image`,
+    `ultra premium vertical advertising photograph, no text, no watermark, no UI elements`,
 
-    // ── 5. Negativo ────────────────────────────────────────────────
-    `avoid: cropped product, vehicle filling entire frame, wheels or roof cut off, any text or letters in the image`,
+    // ── 6. Negativo ────────────────────────────────────────────────
+    `avoid: product touching image borders, product cropped at any edge, ` +
+    `vehicle filling entire frame top to bottom, product taller than 50% of image, ` +
+    `any text or letters or numbers in the image`,
   ]
 
-  return parts.join(',\n')
+  return parts.join(', ')
 }
 
 // ── Prompt padrão para 1:1 e landscape ───────────────────────────────
