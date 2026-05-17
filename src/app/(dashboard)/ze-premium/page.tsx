@@ -79,7 +79,7 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 const FORMAT_OPTIONS = Object.values(SOCIAL_FORMATS)
 
 const LOADING_MESSAGES = [
-  'Enviando para o gpt-image-2...',
+  'Zé Post está criando sua arte...',
   'Compondo arte com identidade visual...',
   'Adicionando logomarca e elementos...',
   'Finalizando criativo premium...',
@@ -213,7 +213,7 @@ function LoadingCard({ msgIndex, formatId }: { msgIndex: number; formatId: Socia
       <div className="px-4 py-3 space-y-1.5">
         <div className="flex justify-between text-xs">
           <span style={{ color: C.muted }}>
-            {isCarousel ? 'Gerando 3 slides com gpt-image-2' : 'Gerando com gpt-image-2'}
+            {isCarousel ? 'Gerando 3 slides com Zé Post' : 'Gerando arte com Zé Post'}
           </span>
           <span className="animate-pulse font-semibold" style={{ color: C.orange }}>IA</span>
         </div>
@@ -344,6 +344,68 @@ function ApproveModal({ onPublish, onSchedule, onClose }: {
   )
 }
 
+// ── Confetti ──────────────────────────────────────────────────────
+
+const CONFETTI_COLORS = ['#FE7902', '#052D64', '#0A3D8E', '#FFD166', '#FFFFFF', '#FF6B6B', '#4ECDC4']
+
+interface ConfettiPiece {
+  id:    number
+  x:     number   // % from left
+  delay: number   // s
+  dur:   number   // s
+  color: string
+  size:  number   // px
+  rot:   number   // initial rotation deg
+  shape: 'rect' | 'circle' | 'ribbon'
+}
+
+function generatePieces(count: number): ConfettiPiece[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id:    i,
+    x:     Math.random() * 100,
+    delay: Math.random() * 0.8,
+    dur:   1.8 + Math.random() * 1.4,
+    color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+    size:  6 + Math.floor(Math.random() * 8),
+    rot:   Math.floor(Math.random() * 360),
+    shape: (['rect', 'circle', 'ribbon'] as const)[Math.floor(Math.random() * 3)],
+  }))
+}
+
+function ConfettiOverlay({ onDone }: { onDone: () => void }) {
+  const [pieces] = useState<ConfettiPiece[]>(() => generatePieces(90))
+
+  useEffect(() => {
+    const t = setTimeout(onDone, 3200)
+    return () => clearTimeout(t)
+  }, [onDone])
+
+  return (
+    <div className="fixed inset-0 pointer-events-none z-[999] overflow-hidden" aria-hidden="true">
+      {pieces.map(p => (
+        <div
+          key={p.id}
+          style={{
+            position:         'absolute',
+            left:             `${p.x}%`,
+            top:              '-20px',
+            width:            p.shape === 'ribbon' ? p.size * 0.4 : p.size,
+            height:           p.shape === 'ribbon' ? p.size * 2.5 : p.size,
+            borderRadius:     p.shape === 'circle' ? '50%' : p.shape === 'ribbon' ? 2 : 2,
+            background:       p.color,
+            transform:        `rotate(${p.rot}deg)`,
+            animationName:    'confettiFall',
+            animationDuration:       `${p.dur}s`,
+            animationDelay:          `${p.delay}s`,
+            animationTimingFunction: 'ease-in',
+            animationFillMode:       'forwards',
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
 // ── Label helper ──────────────────────────────────────────────────
 
 function CardLabel({ children }: { children: React.ReactNode }) {
@@ -377,6 +439,8 @@ export default function ZePremiumPage() {
   const [refazerText,    setRefazerText]    = useState('')
   const [refazerLoading, setRefazerLoading] = useState(false)
 
+  const [showConfetti, setShowConfetti] = useState(false)
+
   const descRef     = useRef<HTMLTextAreaElement>(null)
   const refazerRef  = useRef<HTMLTextAreaElement>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -409,6 +473,7 @@ export default function ZePremiumPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Falha na geração')
       setResult(data as GenerateResult)
+      setShowConfetti(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao gerar. Tente novamente.')
     } finally {
@@ -862,6 +927,11 @@ export default function ZePremiumPage() {
         </div>
       </div>
 
+      {/* Confetti */}
+      {showConfetti && (
+        <ConfettiOverlay onDone={() => setShowConfetti(false)} />
+      )}
+
       {/* Approve Modal */}
       {approveModal && (
         <ApproveModal
@@ -872,6 +942,12 @@ export default function ZePremiumPage() {
       )}
 
       <style jsx global>{`
+        @keyframes confettiFall {
+          0%   { transform: translateY(0) rotate(0deg) scaleX(1);   opacity: 1; }
+          60%  { opacity: 1; }
+          80%  { transform: translateY(90vh) rotate(720deg) scaleX(0.6); opacity: 0.7; }
+          100% { transform: translateY(110vh) rotate(1080deg) scaleX(0.3); opacity: 0; }
+        }
         @keyframes shimmer {
           0%   { transform: translateX(-100%) }
           100% { transform: translateX(200%) }

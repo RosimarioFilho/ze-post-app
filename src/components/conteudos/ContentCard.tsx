@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Pencil, Trash2, Calendar, ImageIcon, Loader2, Download, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Pencil, Trash2, Calendar, ImageIcon, Loader2, Download, ChevronLeft, ChevronRight, Send } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { STATUS_LABELS, CONTENT_TYPE_LABELS } from '@/types'
 import { timeAgo } from '@/lib/utils'
@@ -23,7 +23,6 @@ const TYPE_COLORS: Record<string, string> = {
   reels: '#000000',
 }
 
-// Dimensões reais de cada formato
 const AR_DIMS: Record<string, [number, number]> = {
   post_instagram:       [1080, 1080],
   post_facebook:        [1080, 566],
@@ -35,9 +34,7 @@ const AR_DIMS: Record<string, [number, number]> = {
   reels:                [1080, 1920],
 }
 
-// Máximo de altura proporcional para o thumbnail do card (evita cards enormes)
-// Expressado como fração da largura do container (padding-bottom %)
-const MAX_THUMB_RATIO = 1.1   // max 110% da largura = approx 4:5 limitado
+const MAX_THUMB_RATIO = 1.1
 
 interface ContentCardProps {
   content: {
@@ -91,7 +88,6 @@ function HtmlArtThumbnail({ html, src, dims }: { html?: string; src?: string; di
   )
 }
 
-// Thumbnail com aspect ratio correto mas altura máxima controlada
 function CardThumbnail({
   content: c, dims, typeColor, artImageUrl, hasArtHtml, artHtmlUrl,
 }: {
@@ -111,7 +107,6 @@ function CardThumbnail({
   const total = imageUrls.length
 
   const [W, H] = dims
-  // Calcula ratio limitado: se a imagem for mais alta que MAX_THUMB_RATIO × largura, limita
   const rawRatio = H / W
   const cappedRatio = Math.min(rawRatio, MAX_THUMB_RATIO)
   const paddingPct = `${cappedRatio * 100}%`
@@ -142,26 +137,26 @@ function CardThumbnail({
           </div>
         )}
 
-        {/* Navegação de slides para carrossel */}
+        {/* ── Navegação do carrossel — z-30 acima do hover overlay ── */}
         {isCarousel && total > 1 && (
           <>
             <button
               onClick={(e) => { e.stopPropagation(); setSlideIdx(i => Math.max(0, i - 1)) }}
               disabled={slideIdx === 0}
-              className="absolute left-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center disabled:opacity-20 transition-colors z-10"
+              className="absolute left-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center disabled:opacity-20 transition-colors z-30"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); setSlideIdx(i => Math.min(total - 1, i + 1)) }}
               disabled={slideIdx === total - 1}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center disabled:opacity-20 transition-colors z-10"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center disabled:opacity-20 transition-colors z-30"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
 
             {/* Dots */}
-            <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1 z-10">
+            <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1 z-30">
               {imageUrls.map((_, i) => (
                 <button
                   key={i}
@@ -174,7 +169,7 @@ function CardThumbnail({
             </div>
 
             {/* Contador */}
-            <div className="absolute top-8 right-2 bg-black/50 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full z-10">
+            <div className="absolute top-8 right-2 bg-black/50 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full z-30">
               {slideIdx + 1}/{total}
             </div>
           </>
@@ -186,12 +181,15 @@ function CardThumbnail({
 
 export function ContentCard({ content: c }: ContentCardProps) {
   const router = useRouter()
-  const [deleting, setDeleting] = useState(false)
+  const [deleting,  setDeleting]  = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [posting,   setPosting]   = useState(false)
+  const [posted,    setPosted]    = useState(false)
 
   const st = STATUS_LABELS[c.status as keyof typeof STATUS_LABELS]
   const typeColor = TYPE_COLORS[c.content_type] ?? '#6b7280'
+  const isCarousel = c.content_type === 'carrossel'
 
   const artHtmlUrl = c.media_urls?.find(u => u.endsWith('.html'))
   const artImageUrl = c.media_urls?.find(u => !u.endsWith('.html'))
@@ -199,6 +197,8 @@ export function ContentCard({ content: c }: ContentCardProps) {
   const dims: [number, number] = c.art_width && c.art_height
     ? [c.art_width, c.art_height]
     : (AR_DIMS[c.content_type] ?? [1080, 1080])
+
+  const alreadyPublished = c.status === 'publicado' || posted
 
   async function handleDelete() {
     if (!confirmDelete) {
@@ -211,6 +211,18 @@ export function ContentCard({ content: c }: ContentCardProps) {
     await supabase.from('approvals').delete().eq('content_id', c.id)
     await supabase.from('contents').delete().eq('id', c.id)
     router.refresh()
+  }
+
+  async function handlePost() {
+    setPosting(true)
+    try {
+      const supabase = createClient()
+      await supabase.from('contents').update({ status: 'publicado' }).eq('id', c.id)
+      setPosted(true)
+      router.refresh()
+    } finally {
+      setPosting(false)
+    }
   }
 
   async function downloadArt() {
@@ -237,13 +249,12 @@ export function ContentCard({ content: c }: ContentCardProps) {
       URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Download PNG falhou:', err)
-      const blob = new Blob([htmlText], { type: 'text/html' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'criativo.html'
-      a.click()
-      URL.revokeObjectURL(url)
+      if (c.art_html) {
+        const blob = new Blob([c.art_html], { type: 'text/html' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a'); a.href = url; a.download = 'criativo.html'; a.click()
+        URL.revokeObjectURL(url)
+      }
     } finally {
       setDownloading(false)
     }
@@ -251,7 +262,7 @@ export function ContentCard({ content: c }: ContentCardProps) {
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden hover:shadow-md transition-shadow group">
-      {/* Thumbnail com aspect ratio correto e altura máxima controlada */}
+      {/* Thumbnail */}
       <div className="relative">
         <CardThumbnail
           content={c}
@@ -263,7 +274,7 @@ export function ContentCard({ content: c }: ContentCardProps) {
         />
 
         {/* Status badge */}
-        <div className="absolute top-2 right-2 z-10">
+        <div className="absolute top-2 right-2 z-20">
           <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${st?.color ?? 'bg-slate-100 text-slate-600'}`}>
             {st?.label}
           </span>
@@ -271,15 +282,15 @@ export function ContentCard({ content: c }: ContentCardProps) {
 
         {/* Tipo badge */}
         <div
-          className="absolute top-2 left-2 z-10 text-white text-[10px] font-bold px-2 py-0.5 rounded-full"
+          className="absolute top-2 left-2 z-20 text-white text-[10px] font-bold px-2 py-0.5 rounded-full"
           style={{ backgroundColor: typeColor }}
         >
           {CONTENT_TYPE_LABELS[c.content_type as keyof typeof CONTENT_TYPE_LABELS]}
         </div>
 
-        {/* Action buttons no hover */}
-        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 z-20">
-          <Link href={`/conteudos/${c.id}/editar`}>
+        {/* ── Hover overlay — pointer-events-none no fundo para não bloquear o carrossel ── */}
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 z-20 pointer-events-none">
+          <Link href={`/conteudos/${c.id}/editar`} className="pointer-events-auto">
             <button className="flex items-center gap-1.5 px-3 py-2 bg-white rounded-xl text-xs font-bold text-slate-800 hover:bg-slate-100 transition-colors shadow">
               <Pencil className="w-3.5 h-3.5" /> Editar
             </button>
@@ -288,7 +299,7 @@ export function ContentCard({ content: c }: ContentCardProps) {
             <button
               onClick={downloadArt}
               disabled={downloading}
-              className="flex items-center gap-1.5 px-3 py-2 bg-ze-blue text-white rounded-xl text-xs font-bold hover:bg-ze-blue/90 transition-colors shadow disabled:opacity-60"
+              className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 bg-ze-blue text-white rounded-xl text-xs font-bold hover:bg-ze-blue/90 transition-colors shadow disabled:opacity-60"
             >
               {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
               {downloading ? 'Exportando...' : 'Baixar PNG'}
@@ -297,7 +308,7 @@ export function ContentCard({ content: c }: ContentCardProps) {
           <button
             onClick={handleDelete}
             disabled={deleting}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow ${
+            className={`pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-colors shadow ${
               confirmDelete ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-white text-red-500 hover:bg-red-50'
             }`}
           >
@@ -307,7 +318,7 @@ export function ContentCard({ content: c }: ContentCardProps) {
         </div>
       </div>
 
-      {/* Conteúdo */}
+      {/* Conteúdo do card */}
       <div className="p-4">
         <h3 className="font-bold text-slate-900 text-sm leading-snug line-clamp-2 mb-2">{c.title}</h3>
 
@@ -325,14 +336,34 @@ export function ContentCard({ content: c }: ContentCardProps) {
           </div>
         )}
 
-        <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-          <span className="text-[11px] text-slate-400">{timeAgo(c.created_at)}</span>
-          <div className="flex items-center gap-2">
+        {/* ── Barra inferior ── */}
+        <div className="flex items-center justify-between pt-3 border-t border-slate-100 gap-2">
+          <span className="text-[11px] text-slate-400 flex-shrink-0">{timeAgo(c.created_at)}</span>
+
+          <div className="flex items-center gap-2 ml-auto">
             {c.scheduled_at && (
               <span className="flex items-center gap-1 text-[10px] text-blue-600 font-semibold">
                 <Calendar className="w-3 h-3" /> Agendado
               </span>
             )}
+
+            {/* ── Botão Postar / Repostar ── */}
+            <button
+              onClick={handlePost}
+              disabled={posting}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                alreadyPublished
+                  ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  : 'bg-ze-blue text-white hover:bg-ze-blue/90 shadow-sm'
+              } disabled:opacity-50`}
+            >
+              {posting
+                ? <Loader2 className="w-3 h-3 animate-spin" />
+                : <Send className="w-3 h-3" />
+              }
+              {posting ? 'Postando...' : alreadyPublished ? 'Repostar' : 'Postar'}
+            </button>
+
             <div className="flex gap-1">
               {(hasArtHtml || artHtmlUrl) && (
                 <button

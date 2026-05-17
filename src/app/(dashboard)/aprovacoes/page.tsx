@@ -32,6 +32,7 @@ export default function AprovacoesPage() {
       .from('approvals')
       .select('*, content:contents(id,title,content_type,body)')
       .eq('company_id', p?.company_id)
+      .eq('status', 'pendente')
       .order('created_at', { ascending: false })
     setItems(data ?? [])
     setLoading(false)
@@ -61,7 +62,7 @@ export default function AprovacoesPage() {
         <Card>
           <div className="py-16 flex flex-col items-center gap-3 text-slate-400">
             <CheckCircle className="w-12 h-12 opacity-30" />
-            <p className="font-medium">Nenhuma aprovação pendente</p>
+            <p className="font-medium">No momento não temos artes para serem aprovadas</p>
           </div>
         </Card>
       ) : (
