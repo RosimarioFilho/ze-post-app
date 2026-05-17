@@ -1,111 +1,61 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
-import { Upload, Sparkles, Download, RefreshCw, X, ImageIcon, Zap, Type, Monitor, ShieldCheck, ChevronLeft, ChevronRight, Layers } from 'lucide-react'
-import type { ZePremiumNiche, ZePremiumStyle } from '@/lib/ze-premium-prompt-builder'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import {
+  Upload, Sparkles, Download, X, ImageIcon,
+  ChevronLeft, ChevronRight, CheckCircle2, RotateCcw,
+  ThumbsDown, Calendar, Send, Loader2, Wand2,
+} from 'lucide-react'
 import { SOCIAL_FORMATS, type SocialFormatId } from '@/lib/social-formats'
-import type { SafeAreaScores } from '@/lib/safe-area-engine'
-import type { LayoutCompositionMode } from '@/lib/layout-composition-engine'
-import { getTextOverlayPreviewStyles, drawTextOnCanvas, type CopyData } from '@/lib/text-overlay-engine'
+import { createClient } from '@/lib/supabase/client'
 
-// ── Opções ────────────────────────────────────────────────────
+// ── Paleta Ze Post ───────────────────────────────────────────────
+const C = {
+  navy:   '#052D64',   // fundo header / botão primário
+  blue:   '#0A3D8E',   // acentos secundários
+  orange: '#FE7902',   // CTAs, destaques
+  light:  '#F2F2F2',   // fundo da página
+  white:  '#FFFFFF',   // fundo dos cards
+  border: '#E2EAF4',   // bordas delicadas
+  muted:  '#6B84A3',   // texto secundário
+  text:   '#1A3558',   // texto principal dos cards
+} as const
 
-const NICHES: { value: ZePremiumNiche; label: string }[] = [
-  { value: 'automotivo',    label: '🚗 Automotivo' },
-  { value: 'restaurante',   label: '🍽️ Restaurante' },
-  { value: 'moda',          label: '👗 Moda' },
-  { value: 'tecnologia',    label: '💻 Tecnologia' },
-  { value: 'energia_solar', label: '☀️ Energia Solar' },
-  { value: 'corporativo',   label: '🏢 Corporativo' },
-  { value: 'ecommerce',     label: '🛒 E-commerce' },
-  { value: 'educacao',      label: '📚 Educação' },
-]
+// ── Tipos ────────────────────────────────────────────────────────
 
-const STYLES: { value: ZePremiumStyle; label: string; desc: string }[] = [
-  { value: 'automotive_premium', label: 'Automotive Premium', desc: 'Campanha cinematográfica automotiva' },
-  { value: 'premium_dark',       label: 'Premium Dark',       desc: 'Dark elegante de alto impacto' },
-  { value: 'black_luxury',       label: 'Black Luxury',       desc: 'Ultra luxo, estilo Porsche / Rolex' },
-  { value: 'luxury',             label: 'Luxury',             desc: 'Elegância editorial e atemporal' },
-  { value: 'cinematic',          label: 'Cinematic',          desc: 'Drama cinematográfico profissional' },
-  { value: 'aggressive_ads',     label: 'Aggressive Ads',     desc: 'Impacto máximo, estilo Nike / Red Bull' },
-  { value: 'modern_clean',       label: 'Modern Clean',       desc: 'Limpo, moderno e confiável' },
-  { value: 'minimal',            label: 'Minimal',            desc: 'Simplicidade premium Escandinava' },
-]
-
-const FORMAT_OPTIONS = Object.values(SOCIAL_FORMATS)
-
-const LOADING_MESSAGES = [
-  'Inicializando motor visual multimodal...',
-  'Aplicando safe area da plataforma...',
-  'Analisando composição do produto...',
-  'Integrando headline na arte...',
-  'Aplicando estilo tipográfico premium...',
-  'Finalizando campanha publicitária...',
-]
-
-const CAROUSEL_LOADING_MESSAGES = [
-  'Montando estratégia narrativa do carrossel...',
-  'Gerando slide Hook — criando o gancho...',
-  'Gerando slide de Desejo / Benefício...',
-  'Aplicando safe area em cada slide...',
-  'Gerando slide de Prova Social...',
-  'Finalizando slide de CTA...',
-  'Verificando consistência visual entre slides...',
-  'Quase pronto — compilando carrossel premium...',
-]
-
-// ── Tipos ──────────────────────────────────────────────────────
-
-/** Resultado de um slide individual no carrossel */
-interface CarouselSlideResult {
-  slideNumber:      number
-  role:             string
-  roleLabel:        string
-  headline:         string
-  subline:          string
-  cta?:             string
-  imageBase64:      string
-  mimeType:         string
-  safeAreaScores?:  SafeAreaScores
-  productSafeScore?: number
+interface SlideResult {
+  index:       number
+  imageBase64: string
+  mimeType:    string
+  provider:    string
 }
 
-/** Resultado de geração — imagem única ou carrossel */
 interface GenerateResult {
-  // Imagem única
-  imageBase64?:      string
-  mimeType?:         string
-  provider?:         string
-  prompt?:           string
-  // Campos comuns
-  formatId?:         SocialFormatId
-  formatLabel?:      string
-  styleId?:          ZePremiumStyle
-  compositionMode?:  LayoutCompositionMode
-  formatRiskLevel?:  'low' | 'medium' | 'high'
-  safeAreaScores?:   SafeAreaScores
-  productSafeScore?: number
-  copyVariationId?:  number
-  // Copy — renderizado pelo text-overlay-engine
-  copyData?:         CopyData
-  // Carrossel
-  totalSlides?:      number
-  slides?:           CarouselSlideResult[]
+  isCarousel:   boolean
+  imageBase64?: string
+  mimeType?:    string
+  provider?:    string
+  slides?:      SlideResult[]
+  formatId?:    SocialFormatId
+  formatLabel?: string
+  hasLogo?:     boolean
+  companyName?: string | null
 }
 
 interface UploadedImage {
-  base64: string
-  mime: string
+  base64:  string
+  mime:    string
   preview: string
-  name: string
+  name:    string
 }
 
-// ── Helpers ────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
-    reader.onload = () => resolve((reader.result as string).split(',')[1])
+    reader.onload  = () => resolve((reader.result as string).split(',')[1])
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
@@ -119,11 +69,53 @@ function getAspectClass(formatId: SocialFormatId): string {
   return 'aspect-video'
 }
 
-// ── Upload Zone ────────────────────────────────────────────────
+function base64ToBlob(base64: string, mimeType: string): Blob {
+  const binaryStr = atob(base64)
+  const bytes = new Uint8Array(binaryStr.length)
+  for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i)
+  return new Blob([bytes], { type: mimeType })
+}
 
-function UploadZone({
-  label, hint, image, onUpload, onRemove,
-}: {
+const FORMAT_OPTIONS = Object.values(SOCIAL_FORMATS)
+
+const LOADING_MESSAGES = [
+  'Enviando para o gpt-image-2...',
+  'Compondo arte com identidade visual...',
+  'Adicionando logomarca e elementos...',
+  'Finalizando criativo premium...',
+]
+const CAROUSEL_LOADING = [
+  'Gerando 3 slides em paralelo...',
+  'Criando abertura impactante...',
+  'Desenvolvendo conteúdo dos slides...',
+  'Montando chamada para ação...',
+]
+
+// ── Card wrapper ─────────────────────────────────────────────────
+
+const cardStyle: React.CSSProperties = {
+  background:   C.white,
+  border:       `1px solid ${C.border}`,
+  borderRadius: 16,
+  padding:      20,
+}
+
+// ── Input style ──────────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = {
+  width:        '100%',
+  background:   '#F8FAFD',
+  border:       `1px solid ${C.border}`,
+  borderRadius: 10,
+  padding:      '10px 14px',
+  fontSize:     14,
+  color:        C.navy,
+  outline:      'none',
+}
+
+// ── Upload Zone ──────────────────────────────────────────────────
+
+function UploadZone({ label, hint, image, onUpload, onRemove }: {
   label: string; hint: string
   image: UploadedImage | null
   onUpload: (img: UploadedImage) => void
@@ -146,15 +138,19 @@ function UploadZone({
 
   if (image) {
     return (
-      <div className="relative rounded-xl overflow-hidden border border-white/10 group">
-        <img src={image.preview} alt={label} className="w-full h-36 object-cover" />
-        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-          <button onClick={onRemove} className="flex items-center gap-2 px-3 py-1.5 bg-red-500/80 rounded-lg text-white text-sm font-medium">
+      <div className="relative rounded-xl overflow-hidden group"
+        style={{ border: `1px solid ${C.border}` }}>
+        <img src={image.preview} alt={label} className="w-full h-32 object-cover" />
+        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+          <button onClick={onRemove}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-sm font-medium"
+            style={{ background: 'rgba(220,38,38,0.85)' }}>
             <X className="w-3.5 h-3.5" /> Remover
           </button>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 bg-black/70 px-3 py-1.5">
-          <p className="text-xs text-white/70 truncate">{image.name}</p>
+        <div className="absolute bottom-0 left-0 right-0 px-3 py-1.5"
+          style={{ background: 'rgba(5,45,100,0.80)' }}>
+          <p className="text-xs truncate text-white/70">{image.name}</p>
         </div>
       </div>
     )
@@ -166,15 +162,16 @@ function UploadZone({
       onDragOver={e => { e.preventDefault(); setDragging(true) }}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
-      className={[
-        'flex flex-col items-center justify-center gap-2 h-36 rounded-xl border-2 border-dashed cursor-pointer transition-all',
-        dragging ? 'border-violet-400 bg-violet-500/10' : 'border-white/10 hover:border-white/25 hover:bg-white/5',
-      ].join(' ')}
+      className="flex flex-col items-center justify-center gap-2 h-32 rounded-xl border-2 border-dashed cursor-pointer transition-all"
+      style={{
+        borderColor: dragging ? C.orange : C.border,
+        background:  dragging ? `${C.orange}08` : '#F8FAFD',
+      }}
     >
-      <Upload className="w-5 h-5 text-white/30" />
+      <Upload className="w-5 h-5" style={{ color: dragging ? C.orange : C.muted }} />
       <div className="text-center">
-        <p className="text-sm font-medium text-white/60">{label}</p>
-        <p className="text-xs text-white/25 mt-0.5">{hint}</p>
+        <p className="text-sm font-medium" style={{ color: C.text }}>{label}</p>
+        <p className="text-xs mt-0.5" style={{ color: C.muted }}>{hint}</p>
       </div>
       <input ref={inputRef} type="file" accept="image/*" className="hidden"
         onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
@@ -182,451 +179,164 @@ function UploadZone({
   )
 }
 
-// ── Loading Card ───────────────────────────────────────────────
+// ── Loading Card ──────────────────────────────────────────────────
 
 function LoadingCard({ msgIndex, formatId }: { msgIndex: number; formatId: SocialFormatId }) {
-  const aspectCls   = getAspectClass(formatId)
-  const isCarousel  = formatId === 'INSTAGRAM_CAROUSEL'
-  const messages    = isCarousel ? CAROUSEL_LOADING_MESSAGES : LOADING_MESSAGES
-
-  return (
-    <div className="rounded-2xl border border-white/8 bg-white/2 p-6 flex flex-col gap-5">
-      {isCarousel ? (
-        // Loading especial para carrossel — mostra múltiplos quadros
-        <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-white/4">
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/8 to-transparent animate-shimmer" />
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-            <div className="relative">
-              <div className="w-16 h-16 rounded-2xl bg-violet-500/20 flex items-center justify-center">
-                <Layers className="w-8 h-8 text-violet-400 animate-pulse" />
-              </div>
-              <div className="absolute inset-0 rounded-2xl border-2 border-violet-400/30 animate-ping" />
-            </div>
-            <p className="text-sm text-white/40 text-center px-4">
-              {messages[msgIndex % messages.length]}
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className={`relative w-full ${aspectCls} rounded-xl overflow-hidden bg-white/4`}>
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/8 to-transparent animate-shimmer" />
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-            <div className="relative">
-              <div className="w-16 h-16 rounded-2xl bg-violet-500/20 flex items-center justify-center">
-                <Sparkles className="w-8 h-8 text-violet-400 animate-pulse" />
-              </div>
-              <div className="absolute inset-0 rounded-2xl border-2 border-violet-400/30 animate-ping" />
-            </div>
-            <p className="text-sm text-white/40 text-center px-4">
-              {messages[msgIndex % messages.length]}
-            </p>
-          </div>
-        </div>
-      )}
-      <div className="space-y-2">
-        <div className="flex justify-between text-xs text-white/25">
-          <span>
-            {isCarousel
-              ? 'Gerando slides com estratégia narrativa...'
-              : 'Compondo arte com safe area aplicada...'}
-          </span>
-          <span className="animate-pulse">IA Multimodal</span>
-        </div>
-        <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-          <div className={[
-            'h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full',
-            isCarousel ? 'animate-progress-slow' : 'animate-progress',
-          ].join(' ')} />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Safe Area Score Badge ──────────────────────────────────────
-
-function SafeScoreBadge({ scores }: { scores: SafeAreaScores }) {
-  const color =
-    scores.risk_level === 'low'    ? 'text-emerald-400 border-emerald-400/30 bg-emerald-400/8' :
-    scores.risk_level === 'medium' ? 'text-yellow-400 border-yellow-400/30 bg-yellow-400/8' :
-                                     'text-red-400 border-red-400/30 bg-red-400/8'
-  const label =
-    scores.risk_level === 'low'    ? 'Safe Area ✓' :
-    scores.risk_level === 'medium' ? 'Safe Area ~' :
-                                     'Safe Area !'
-
-  return (
-    <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold ${color}`}>
-      <ShieldCheck className="w-3 h-3" />
-      {label} {scores.overall}%
-    </div>
-  )
-}
-
-// ── Download com texto composto via Canvas 2D ──────────────────────
-// Carrega a imagem base64, desenha o texto em cima com canvas nativo,
-// sem depender de html2canvas — funciona na resolução real do modelo.
-
-async function downloadWithTextOverlay(
-  imageBase64: string,
-  mimeType:    string,
-  formatId:    SocialFormatId,
-  styleId:     ZePremiumStyle,
-  copy:        CopyData,
-  filename:    string,
-) {
-  const img = new Image()
-  await new Promise<void>((res, rej) => {
-    img.onload  = () => res()
-    img.onerror = rej
-    img.src = `data:${mimeType};base64,${imageBase64}`
-  })
-
-  const canvas = document.createElement('canvas')
-  canvas.width  = img.naturalWidth
-  canvas.height = img.naturalHeight
-
-  const ctx = canvas.getContext('2d')!
-  ctx.drawImage(img, 0, 0)
-  drawTextOnCanvas(ctx, canvas.width, canvas.height, formatId, styleId, copy)
-
-  const link = document.createElement('a')
-  link.download = filename
-  link.href     = canvas.toDataURL('image/png')
-  link.click()
-}
-
-// ── Result Card ────────────────────────────────────────────────
-
-function ResultCard({ result, onRegenerate }: { result: GenerateResult; onRegenerate: () => void }) {
-  const dataUrl    = `data:${result.mimeType ?? 'image/png'};base64,${result.imageBase64 ?? ''}`
-  const formatId   = result.formatId ?? 'INSTAGRAM_POST'
-  const styleId    = result.styleId  ?? 'premium_dark'
+  const isCarousel = formatId === 'INSTAGRAM_CAROUSEL'
+  const messages   = isCarousel ? CAROUSEL_LOADING : LOADING_MESSAGES
   const aspectCls  = getAspectClass(formatId)
-  const fmt        = SOCIAL_FORMATS[formatId]
-  const isVertical = fmt?.genH > fmt?.genW
-
-  // CSS overlay para preview
-  const overlayStyles = result.copyData
-    ? getTextOverlayPreviewStyles(formatId, styleId)
-    : null
-  const copy = result.copyData ?? null
-
-  async function handleDownload() {
-    if (!result.imageBase64 || !copy) {
-      // Fallback: download da imagem sem texto
-      const a = document.createElement('a')
-      a.href = dataUrl; a.download = `ze-premium-${formatId}-${Date.now()}.png`; a.click()
-      return
-    }
-    await downloadWithTextOverlay(
-      result.imageBase64,
-      result.mimeType ?? 'image/png',
-      formatId,
-      styleId,
-      copy,
-      `ze-premium-${formatId}-${Date.now()}.png`,
-    )
-  }
 
   return (
-    <div className="rounded-2xl border border-white/8 bg-white/2 overflow-hidden">
-      <div className={`relative ${aspectCls} w-full`} style={{ containerType: 'inline-size' }}>
-        <img src={dataUrl} alt="Arte premium gerada" className="w-full h-full object-cover" />
-
-        {/* ── Text overlay — posicionado via text-overlay-engine ── */}
-        {overlayStyles && copy && (
-          <div style={overlayStyles.container}>
-            <p style={{ ...overlayStyles.headline, margin: 0 }}>{copy.headline}</p>
-            {copy.subheadline && (
-              <p style={{ ...overlayStyles.subline, margin: 0 }}>{copy.subheadline}</p>
-            )}
-            {copy.cta && (
-              <span style={overlayStyles.cta}>{copy.cta}</span>
-            )}
-          </div>
-        )}
-
-        {/* Safe area overlay — apenas formatos verticais com danger zones */}
-        {isVertical && fmt?.dangerZoneIds?.length > 0 && (
-          <>
-            {/* Top danger zone */}
-            <div className="absolute top-0 left-0 right-0 h-[15%] bg-red-500/10 border-b border-red-400/20 pointer-events-none" />
-            {/* Bottom danger zone */}
-            <div className="absolute bottom-0 left-0 right-0 h-[18%] bg-red-500/10 border-t border-red-400/20 pointer-events-none" />
-            {/* Right action bar (se existir) */}
-            {fmt.dangerZoneIds.some(id => id.includes('right') || id.includes('tiktok')) && (
-              <div className="absolute top-0 right-0 bottom-0 w-[12%] bg-amber-500/8 border-l border-amber-400/15 pointer-events-none" />
-            )}
-            {/* Label */}
-            <div className="absolute top-[15%] left-2 right-2 flex justify-center pointer-events-none">
-              <span className="px-2 py-0.5 bg-black/50 backdrop-blur rounded text-[9px] text-white/30 border border-white/8">
-                ↕ Zona segura do produto
-              </span>
-            </div>
-          </>
-        )}
-
-        <div className="absolute top-3 right-3 flex flex-col gap-2 items-end">
-          {result.provider && (
-            <span className="px-2 py-1 bg-black/60 backdrop-blur rounded-lg text-xs text-white/50 border border-white/10">
-              {result.provider}
-            </span>
-          )}
-          {result.safeAreaScores && (
-            <SafeScoreBadge scores={result.safeAreaScores} />
-          )}
+    <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${C.border}`, background: C.white }}>
+      {/* Imagem dark enquanto gera */}
+      <div className={`relative w-full ${isCarousel ? 'aspect-square' : aspectCls} flex flex-col items-center justify-center gap-4`}
+        style={{ background: C.navy }}>
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="absolute inset-0 animate-shimmer"
+            style={{ background: `linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent)` }} />
         </div>
-        {result.formatLabel && (
-          <div className="absolute bottom-3 left-3">
-            <span className="px-2 py-1 bg-black/60 backdrop-blur rounded-lg text-xs text-white/60 border border-white/10">
-              {result.formatLabel}
-            </span>
-          </div>
-        )}
-      </div>
-      <div className="p-4 flex flex-col gap-3">
-        {result.safeAreaScores && (
-          <>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              {[
-                { label: 'Headline',    score: result.safeAreaScores.headline_safe_score },
-                { label: 'CTA',         score: result.safeAreaScores.cta_safe_score },
-                { label: 'Logo',        score: result.safeAreaScores.logo_safe_score },
-                { label: 'Tipografia',  score: result.safeAreaScores.typography_margin_score },
-                ...(result.productSafeScore !== undefined
-                  ? [{ label: 'Produto', score: result.productSafeScore }]
-                  : []),
-              ].map(({ label, score }) => (
-                <div key={label} className="flex items-center justify-between px-2.5 py-1.5 bg-white/4 rounded-lg">
-                  <span className="text-white/40">{label}</span>
-                  <span className={score >= 85 ? 'text-emerald-400' : score >= 70 ? 'text-yellow-400' : 'text-red-400'}>
-                    {score}
-                  </span>
-                </div>
-              ))}
+        <div className="relative z-10 flex flex-col items-center gap-3">
+          <div className="relative">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+              style={{ background: `${C.orange}20` }}>
+              <Wand2 className="w-8 h-8 animate-pulse" style={{ color: C.orange }} />
             </div>
-            {result.compositionMode && (
-              <div className="flex items-center gap-2 px-2.5 py-1.5 bg-white/3 rounded-lg text-xs">
-                <span className="text-white/25">Composição:</span>
-                <span className="text-violet-300/70 font-mono text-[10px]">{result.compositionMode}</span>
-              </div>
-            )}
-          </>
-        )}
-        <button onClick={handleDownload}
-          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-semibold text-sm hover:opacity-90 transition-opacity">
-          <Download className="w-4 h-4" /> Baixar Arte
-        </button>
-        <button onClick={onRegenerate}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-white/10 bg-white/5 text-white/60 text-sm font-medium hover:bg-white/8 transition-colors">
-          <RefreshCw className="w-4 h-4" /> Gerar Variação
-        </button>
+            <div className="absolute inset-0 rounded-2xl animate-ping"
+              style={{ border: `2px solid ${C.orange}50` }} />
+          </div>
+          <p className="text-sm text-center px-6 text-white/60">
+            {messages[msgIndex % messages.length]}
+          </p>
+        </div>
+      </div>
+      {/* Progress bar */}
+      <div className="px-4 py-3 space-y-1.5">
+        <div className="flex justify-between text-xs">
+          <span style={{ color: C.muted }}>
+            {isCarousel ? 'Gerando 3 slides com gpt-image-2' : 'Gerando com gpt-image-2'}
+          </span>
+          <span className="animate-pulse font-semibold" style={{ color: C.orange }}>IA</span>
+        </div>
+        <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: C.border }}>
+          <div className="h-full rounded-full animate-progress"
+            style={{ background: `linear-gradient(90deg, ${C.orange}, #FF9A3C)` }} />
+        </div>
       </div>
     </div>
   )
 }
 
-// ── Role badge colors ──────────────────────────────────────────
+// ── Slide Viewer ──────────────────────────────────────────────────
 
-const ROLE_COLORS: Record<string, string> = {
-  HOOK:           'bg-violet-500/20 text-violet-300 border-violet-400/30',
-  DESIRE:         'bg-pink-500/20 text-pink-300 border-pink-400/30',
-  PROBLEM:        'bg-orange-500/20 text-orange-300 border-orange-400/30',
-  BENEFIT:        'bg-emerald-500/20 text-emerald-300 border-emerald-400/30',
-  PROOF:          'bg-cyan-500/20 text-cyan-300 border-cyan-400/30',
-  DIFFERENTIAL:   'bg-blue-500/20 text-blue-300 border-blue-400/30',
-  OBJECTION:      'bg-yellow-500/20 text-yellow-300 border-yellow-400/30',
-  TIP:            'bg-teal-500/20 text-teal-300 border-teal-400/30',
-  COMPARISON:     'bg-indigo-500/20 text-indigo-300 border-indigo-400/30',
-  TRANSFORMATION: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-400/30',
-  CTA:            'bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 text-fuchsia-300 border-fuchsia-400/30',
-}
-
-// ── Carousel Result Card ───────────────────────────────────────
-
-function CarouselResultCard({
-  result, onRegenerate,
-}: {
-  result: GenerateResult
-  onRegenerate: () => void
+function SlideViewer({ slides, currentSlide, onSlideChange }: {
+  slides: SlideResult[]
+  currentSlide: number
+  onSlideChange: (i: number) => void
 }) {
-  const [current, setCurrent] = useState(0)
-  const slides      = result.slides ?? []
-  const totalSlides = slides.length
-  const slide       = slides[current]
-  const styleId     = result.styleId ?? 'premium_dark'
-  const formatId    = (result.formatId ?? 'INSTAGRAM_CAROUSEL') as SocialFormatId
-
+  const slide = slides[currentSlide]
   if (!slide) return null
-
-  const dataUrl = `data:${slide.mimeType ?? 'image/png'};base64,${slide.imageBase64}`
-  const roleCls = ROLE_COLORS[slide.role] ?? 'bg-white/10 text-white/50 border-white/20'
-
-  // CSS overlay para o slide atual
-  const overlayStyles = getTextOverlayPreviewStyles(formatId, styleId)
-  const slideCopy: CopyData = {
-    headline:    slide.headline,
-    subheadline: slide.subline ?? null,
-    cta:         slide.cta    ?? null,
-  }
-
-  async function downloadSlide(s: CarouselSlideResult, idx: number) {
-    const copy: CopyData = { headline: s.headline, subheadline: s.subline ?? null, cta: s.cta ?? null }
-    await downloadWithTextOverlay(
-      s.imageBase64,
-      s.mimeType ?? 'image/png',
-      formatId,
-      styleId,
-      copy,
-      `ze-premium-carousel-${idx + 1}-${s.role}-${Date.now()}.png`,
-    )
-  }
-
-  async function downloadAll() {
-    for (let i = 0; i < slides.length; i++) {
-      await downloadSlide(slides[i], i)
-      await new Promise(r => setTimeout(r, 400))
-    }
-  }
+  const dataUrl = `data:${slide.mimeType};base64,${slide.imageBase64}`
 
   return (
-    <div className="rounded-2xl border border-white/8 bg-white/2 overflow-hidden">
+    <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${C.border}`, background: C.white }}>
+      <div className="relative aspect-square w-full">
+        <img src={dataUrl} alt={`Slide ${currentSlide + 1}`} className="w-full h-full object-cover" />
 
-      {/* Cabeçalho do carrossel */}
-      <div className="px-4 pt-4 pb-3 border-b border-white/6 flex items-center gap-2">
-        <Layers className="w-4 h-4 text-violet-400 flex-shrink-0" />
-        <span className="text-sm font-semibold text-white/70">Carrossel Estratégico</span>
-        <span className="ml-auto text-xs text-white/30">{totalSlides} slides</span>
-        {result.formatLabel && (
-          <span className="text-xs px-2 py-0.5 bg-white/6 rounded border border-white/8 text-white/40">
-            {result.formatLabel}
+        {/* Provider */}
+        <div className="absolute top-3 right-3">
+          <span className="px-2 py-1 rounded-lg text-xs backdrop-blur font-medium"
+            style={{ background: 'rgba(5,45,100,0.75)', color: 'rgba(255,255,255,0.75)', border: `1px solid rgba(255,255,255,0.15)` }}>
+            {slide.provider}
           </span>
+        </div>
+
+        {/* Slide badge */}
+        <div className="absolute top-3 left-3">
+          <span className="px-2.5 py-1 rounded-lg text-xs font-bold"
+            style={{ background: C.orange, color: C.navy }}>
+            Slide {currentSlide + 1} / {slides.length}
+          </span>
+        </div>
+
+        {/* Arrows */}
+        {slides.length > 1 && (
+          <>
+            <button onClick={() => onSlideChange(Math.max(0, currentSlide - 1))}
+              disabled={currentSlide === 0}
+              className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center backdrop-blur transition-opacity disabled:opacity-25"
+              style={{ background: 'rgba(5,45,100,0.80)', border: '1px solid rgba(255,255,255,0.2)' }}>
+              <ChevronLeft className="w-4 h-4 text-white" />
+            </button>
+            <button onClick={() => onSlideChange(Math.min(slides.length - 1, currentSlide + 1))}
+              disabled={currentSlide === slides.length - 1}
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center backdrop-blur transition-opacity disabled:opacity-25"
+              style={{ background: 'rgba(5,45,100,0.80)', border: '1px solid rgba(255,255,255,0.2)' }}>
+              <ChevronRight className="w-4 h-4 text-white" />
+            </button>
+          </>
         )}
       </div>
 
-      {/* Preview do slide atual */}
-      <div className="relative aspect-square w-full" style={{ containerType: 'inline-size' }}>
-        <img
-          src={dataUrl}
-          alt={`Slide ${current + 1} — ${slide.roleLabel}`}
-          className="w-full h-full object-cover"
-        />
-
-        {/* ── Text overlay do slide ── */}
-        <div style={overlayStyles.container}>
-          <p style={{ ...overlayStyles.headline, margin: 0 }}>{slideCopy.headline}</p>
-          {slideCopy.subheadline && (
-            <p style={{ ...overlayStyles.subline, margin: 0 }}>{slideCopy.subheadline}</p>
-          )}
-          {slideCopy.cta && (
-            <span style={overlayStyles.cta}>{slideCopy.cta}</span>
-          )}
-        </div>
-
-        {/* Badge de papel do slide */}
-        <div className="absolute top-3 left-3">
-          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${roleCls}`}>
-            {slide.roleLabel}
-          </span>
-        </div>
-
-        {/* Badge de safe area */}
-        <div className="absolute top-3 right-3">
-          {slide.safeAreaScores && <SafeScoreBadge scores={slide.safeAreaScores} />}
-        </div>
-
-        {/* Indicador de slide */}
-        <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5">
+      {/* Dots */}
+      {slides.length > 1 && (
+        <div className="flex justify-center gap-2 py-3" style={{ borderTop: `1px solid ${C.border}` }}>
           {slides.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => setCurrent(i)}
-              className={[
-                'rounded-full transition-all duration-200',
-                i === current
-                  ? 'w-5 h-1.5 bg-white'
-                  : 'w-1.5 h-1.5 bg-white/30 hover:bg-white/50',
-              ].join(' ')}
-            />
+            <button key={i} onClick={() => onSlideChange(i)}
+              className="rounded-full transition-all duration-200"
+              style={{
+                width:      i === currentSlide ? 20 : 8,
+                height:     8,
+                background: i === currentSlide ? C.orange : C.border,
+              }} />
           ))}
         </div>
-      </div>
+      )}
+    </div>
+  )
+}
 
-      {/* Copy do slide atual */}
-      <div className="px-4 pt-3 pb-2 space-y-1 border-b border-white/6">
-        <p className="text-sm font-semibold text-white/80 leading-snug">{slide.headline}</p>
-        <p className="text-xs text-white/40 leading-relaxed">{slide.subline}</p>
-        {slide.cta && (
-          <p className="text-xs font-semibold text-violet-400 mt-1">→ {slide.cta}</p>
-        )}
-      </div>
+// ── Approve Modal ─────────────────────────────────────────────────
 
-      {/* Navegação */}
-      <div className="px-4 py-3 flex items-center gap-2">
-        <button
-          onClick={() => setCurrent(c => Math.max(0, c - 1))}
-          disabled={current === 0}
-          className="flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
+function ApproveModal({ onPublish, onSchedule, onClose }: {
+  onPublish: () => void
+  onSchedule: () => void
+  onClose: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(5,45,100,0.60)', backdropFilter: 'blur(10px)' }}>
+      <div className="w-full max-w-sm rounded-2xl p-7 space-y-5 shadow-2xl"
+        style={{ background: C.white, border: `1px solid ${C.border}` }}>
 
-        <div className="flex-1 text-center text-xs text-white/35 font-medium">
-          Slide {current + 1} de {totalSlides}
-        </div>
-
-        <button
-          onClick={() => setCurrent(c => Math.min(totalSlides - 1, c + 1))}
-          disabled={current === totalSlides - 1}
-          className="flex items-center justify-center w-9 h-9 rounded-xl border border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Score do slide atual */}
-      {slide.safeAreaScores && (
-        <div className="px-4 pb-3">
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            {[
-              { label: 'Headline',   score: slide.safeAreaScores.headline_safe_score },
-              { label: 'CTA',        score: slide.safeAreaScores.cta_safe_score },
-              ...(slide.productSafeScore !== undefined
-                ? [{ label: 'Produto', score: slide.productSafeScore }]
-                : []),
-            ].map(({ label, score }) => (
-              <div key={label} className="flex items-center justify-between px-2 py-1 bg-white/4 rounded-lg">
-                <span className="text-white/35">{label}</span>
-                <span className={score >= 85 ? 'text-emerald-400' : score >= 70 ? 'text-yellow-400' : 'text-red-400'}>
-                  {score}
-                </span>
-              </div>
-            ))}
+        <div className="flex justify-center">
+          <div className="w-16 h-16 rounded-full flex items-center justify-center"
+            style={{ background: `${C.orange}15` }}>
+            <CheckCircle2 className="w-8 h-8" style={{ color: C.orange }} />
           </div>
         </div>
-      )}
 
-      {/* Botões de download */}
-      <div className="px-4 pb-4 space-y-2">
-        <button
-          onClick={() => void downloadSlide(slide, current)}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-semibold text-sm hover:opacity-90 transition-opacity"
-        >
-          <Download className="w-4 h-4" /> Baixar slide {current + 1}
-        </button>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={downloadAll}
-            className="flex items-center justify-center gap-1.5 py-2 rounded-xl border border-white/10 bg-white/5 text-white/55 text-xs font-medium hover:bg-white/10 transition-colors"
-          >
-            <Download className="w-3.5 h-3.5" /> Baixar todos
+        <div className="text-center">
+          <h3 className="text-xl font-bold" style={{ color: C.navy }}>Arte Aprovada! 🎉</h3>
+          <p className="text-sm mt-1.5" style={{ color: C.muted }}>
+            Sua arte foi salva na biblioteca. O que deseja fazer agora?
+          </p>
+        </div>
+
+        <div className="space-y-2.5">
+          <button onClick={onPublish}
+            className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl font-bold text-sm transition-opacity hover:opacity-90"
+            style={{ background: C.orange, color: C.white }}>
+            <Send className="w-4 h-4" /> Publicar Agora
           </button>
-          <button
-            onClick={onRegenerate}
-            className="flex items-center justify-center gap-1.5 py-2 rounded-xl border border-white/10 bg-white/5 text-white/55 text-xs font-medium hover:bg-white/10 transition-colors"
-          >
-            <RefreshCw className="w-3.5 h-3.5" /> Regerar
+          <button onClick={onSchedule}
+            className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl font-bold text-sm transition-opacity hover:opacity-90"
+            style={{ background: C.navy, color: C.white }}>
+            <Calendar className="w-4 h-4" /> Agendar Publicação
+          </button>
+          <button onClick={onClose}
+            className="w-full py-3 rounded-xl text-sm font-medium transition-opacity hover:opacity-70"
+            style={{ color: C.muted }}>
+            Continuar criando
           </button>
         </div>
       </div>
@@ -634,52 +344,65 @@ function CarouselResultCard({
   )
 }
 
-// ── Shared input classes ───────────────────────────────────────
+// ── Label helper ──────────────────────────────────────────────────
 
-const inputCls = 'w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-violet-400/50 transition-colors'
+function CardLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="text-sm font-bold tracking-wide" style={{ color: C.navy }}>
+      {children}
+    </h2>
+  )
+}
 
-// ── Página principal ───────────────────────────────────────────
+// ── Página principal ──────────────────────────────────────────────
 
 export default function ZePremiumPage() {
-  const [productImage, setProductImage] = useState<UploadedImage | null>(null)
-  const [formatId,     setFormatId]     = useState<SocialFormatId>('INSTAGRAM_POST')
-  const [niche,        setNiche]        = useState<ZePremiumNiche>('automotivo')
-  const [style,        setStyle]        = useState<ZePremiumStyle>('automotive_premium')
+  const router = useRouter()
 
-  // Copy fields — renderizados diretamente pelo modelo multimodal
-  const [headline,    setHeadline]    = useState('')
-  const [subheadline, setSubheadline] = useState('')
-  const [cta,         setCta]         = useState('')
-  const [objective,   setObjective]   = useState('')
+  const [productImage,  setProductImage]  = useState<UploadedImage | null>(null)
+  const [formatId,      setFormatId]      = useState<SocialFormatId>('INSTAGRAM_POST')
+  const [description,   setDescription]   = useState('')
 
-  const [loading,  setLoading]  = useState(false)
-  const [msgIndex, setMsgIndex] = useState(0)
-  const [result,   setResult]   = useState<GenerateResult | null>(null)
-  const [error,    setError]    = useState<string | null>(null)
+  const [loading,   setLoading]   = useState(false)
+  const [msgIndex,  setMsgIndex]  = useState(0)
+  const [result,    setResult]    = useState<GenerateResult | null>(null)
+  const [error,     setError]     = useState<string | null>(null)
 
+  const [currentSlide, setCurrentSlide] = useState(0)
+
+  const [saving,       setSaving]       = useState(false)
+  const [approveModal, setApproveModal] = useState(false)
+
+  const [refazerMode,    setRefazerMode]    = useState(false)
+  const [refazerText,    setRefazerText]    = useState('')
+  const [refazerLoading, setRefazerLoading] = useState(false)
+
+  const descRef     = useRef<HTMLTextAreaElement>(null)
+  const refazerRef  = useRef<HTMLTextAreaElement>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  async function handleGenerate() {
-    if (!headline.trim()) {
-      setError('Escreva a headline da arte antes de gerar.')
-      return
-    }
-    setLoading(true); setResult(null); setError(null); setMsgIndex(0)
-    intervalRef.current = setInterval(() => setMsgIndex(i => i + 1), 3200)
+  useEffect(() => {
+    if (refazerMode) refazerRef.current?.focus()
+  }, [refazerMode])
+
+  // ── Gerar ────────────────────────────────────────────────────
+
+  async function handleGenerate(overrideObjective?: string, overrideProduct?: string) {
+    const obj = overrideObjective ?? description.trim()
+    if (!obj) { setError('Descreva o que você quer criar.'); return }
+
+    setLoading(true); setResult(null); setError(null)
+    setMsgIndex(0); setCurrentSlide(0); setRefazerMode(false)
+    intervalRef.current = setInterval(() => setMsgIndex(i => i + 1), 3500)
 
     try {
       const res = await fetch('/api/ze-premium/generate', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          objective:          objective.trim() || headline,
-          niche,
-          style,
+          objective:          obj,
           formatId,
-          headline:           headline.trim(),
-          subheadline:        subheadline.trim() || undefined,
-          cta:                cta.trim() || undefined,
-          productImageBase64: productImage?.base64,
+          productImageBase64: overrideProduct ?? productImage?.base64,
           productImageMime:   productImage?.mime,
         }),
       })
@@ -687,259 +410,450 @@ export default function ZePremiumPage() {
       if (!res.ok) throw new Error(data.error ?? 'Falha na geração')
       setResult(data as GenerateResult)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Não conseguimos gerar sua arte agora. Tente novamente.')
+      setError(err instanceof Error ? err.message : 'Erro ao gerar. Tente novamente.')
     } finally {
       setLoading(false)
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
   }
 
-  const canGenerate  = !loading && !!headline.trim()
-  const currentFmt   = SOCIAL_FORMATS[formatId]
+  // ── Refazer ──────────────────────────────────────────────────
+
+  async function handleRefazer() {
+    if (!refazerText.trim() || !result) return
+    const currentBase64 = result.isCarousel
+      ? result.slides?.[currentSlide]?.imageBase64
+      : result.imageBase64
+    if (!currentBase64) return
+
+    setRefazerLoading(true); setError(null)
+    try {
+      const res = await fetch('/api/ze-premium/generate', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          objective:          refazerText.trim(),
+          formatId,
+          productImageBase64: currentBase64,
+          productImageMime:   result.isCarousel
+            ? (result.slides?.[currentSlide]?.mimeType ?? 'image/png')
+            : (result.mimeType ?? 'image/png'),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Falha ao refazer')
+      const newResult = data as GenerateResult
+
+      if (result.isCarousel && result.slides && newResult.imageBase64) {
+        const newSlides = [...result.slides]
+        newSlides[currentSlide] = {
+          index:       currentSlide,
+          imageBase64: newResult.imageBase64,
+          mimeType:    newResult.mimeType ?? 'image/png',
+          provider:    newResult.provider ?? 'gpt-image-2',
+        }
+        setResult({ ...result, slides: newSlides })
+      } else {
+        setResult(newResult)
+      }
+      setRefazerMode(false); setRefazerText('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao refazer. Tente novamente.')
+    } finally {
+      setRefazerLoading(false)
+    }
+  }
+
+  // ── Aprovar ──────────────────────────────────────────────────
+
+  async function handleAprovar() {
+    if (!result) return
+    setSaving(true); setError(null)
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Não autenticado')
+      const { data: profile } = await supabase
+        .from('profiles').select('company_id').eq('id', user.id).single()
+      if (!profile?.company_id) throw new Error('Empresa não encontrada')
+
+      const companyId = profile.company_id
+      const timestamp = Date.now()
+      const mediaUrls: string[] = []
+
+      const imgs = result.isCarousel
+        ? (result.slides ?? []).map(s => ({ base64: s.imageBase64, mimeType: s.mimeType, idx: s.index }))
+        : [{ base64: result.imageBase64 ?? '', mimeType: result.mimeType ?? 'image/png', idx: 0 }]
+
+      for (const img of imgs) {
+        const ext  = img.mimeType.includes('png') ? 'png' : img.mimeType.includes('webp') ? 'webp' : 'jpg'
+        const path = `${companyId}/ze-premium/${timestamp}-${img.idx}.${ext}`
+        const blob = base64ToBlob(img.base64, img.mimeType)
+        const { error: uploadErr } = await supabase.storage
+          .from('media').upload(path, blob, { contentType: img.mimeType, upsert: true })
+        if (uploadErr) throw new Error(`Upload: ${uploadErr.message}`)
+        const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(path)
+        mediaUrls.push(publicUrl)
+      }
+
+      const res = await fetch('/api/ze-premium/save', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mediaUrls, description, formatId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Erro ao salvar')
+      setApproveModal(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao aprovar. Tente novamente.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ── Reprovar ─────────────────────────────────────────────────
+
+  function handleReprovar() {
+    setResult(null); setDescription(''); setProductImage(null)
+    setRefazerMode(false); setRefazerText(''); setError(null); setCurrentSlide(0)
+    setTimeout(() => descRef.current?.focus(), 100)
+  }
+
+  // ── Download ─────────────────────────────────────────────────
+
+  function handleDownload() {
+    if (!result) return
+    if (result.isCarousel && result.slides) {
+      result.slides.forEach((s, i) => {
+        const a = document.createElement('a')
+        a.href = `data:${s.mimeType};base64,${s.imageBase64}`
+        a.download = `ze-premium-slide-${i + 1}-${Date.now()}.png`; a.click()
+      })
+    } else if (result.imageBase64) {
+      const a = document.createElement('a')
+      a.href = `data:${result.mimeType ?? 'image/png'};base64,${result.imageBase64}`
+      a.download = `ze-premium-${formatId}-${Date.now()}.png`; a.click()
+    }
+  }
+
+  const canGenerate = !loading && !!description.trim()
+  const currentFmt  = SOCIAL_FORMATS[formatId]
+  const hasResult   = !!result
 
   return (
-    <div className="min-h-screen bg-[#080810] text-white">
-      {/* Ambient glow */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-violet-600/8 rounded-full blur-[120px]" />
-        <div className="absolute -bottom-40 -right-40 w-[500px] h-[500px] bg-fuchsia-600/8 rounded-full blur-[100px]" />
+    <div className="min-h-screen" style={{ background: C.light }}>
+
+      {/* ── HEADER ─────────────────────────────────────────────── */}
+      <div style={{ background: C.navy, borderBottom: `3px solid ${C.orange}` }}>
+        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center gap-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/landing/mascote-ze-post.webp"
+            alt="Zé Post"
+            className="w-14 h-14 object-contain flex-shrink-0"
+            style={{ filter: 'drop-shadow(0 2px 10px rgba(254,121,2,0.4))' }}
+          />
+          <div>
+            <div className="flex items-center gap-2.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/landing/logo-ze-post-dark.svg" alt="Zé Post" className="h-5 w-auto" />
+              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full"
+                style={{ background: C.orange, color: C.white }}>
+                Premium ✦
+              </span>
+            </div>
+            <p className="text-xs mt-1 font-medium" style={{ color: 'rgba(255,255,255,0.55)' }}>
+              Artes premium geradas por Zé Post
+            </p>
+          </div>
+        </div>
       </div>
 
-      <div className="relative max-w-5xl mx-auto px-6 py-10">
-
-        {/* Header */}
-        <div className="mb-10 text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-300 text-xs font-semibold mb-5">
-            <Zap className="w-3.5 h-3.5" />
-            Multimodal AI — Safe Area System
-          </div>
-          <h1 className="text-4xl font-black tracking-tight">
-            <span className="text-white">Zé </span>
-            <span className="bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">Premium</span>
-          </h1>
-          <p className="mt-2 text-white/35 text-sm max-w-lg mx-auto">
-            Produto gerado pelo modelo, texto renderizado com precisão Canvas — resultado perfeito em qualquer formato.
-          </p>
-        </div>
-
+      <div className="max-w-5xl mx-auto px-6 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-6 items-start">
 
-          {/* ── Formulário ── */}
+          {/* ── FORMULÁRIO ─────────────────────────────────────── */}
           <div className="space-y-4">
 
-            {/* Formato da Arte */}
-            <div className="rounded-2xl border border-white/8 bg-white/2 p-5 space-y-3">
-              <div className="flex items-center gap-2">
-                <Monitor className="w-4 h-4 text-violet-400" />
-                <h2 className="text-sm font-semibold text-white/70">Formato da Arte</h2>
-                <span className="ml-auto text-xs font-medium text-violet-400/70">
+            {/* Formato */}
+            <div style={cardStyle}>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+                  style={{ background: `${C.orange}15` }}>
+                  <span className="text-xs font-bold" style={{ color: C.orange }}>⊞</span>
+                </div>
+                <CardLabel>Formato da Arte</CardLabel>
+                <span className="ml-auto text-xs font-semibold" style={{ color: C.orange }}>
                   {currentFmt.officialW}×{currentFmt.officialH}
                 </span>
               </div>
               <select
                 value={formatId}
                 onChange={e => setFormatId(e.target.value as SocialFormatId)}
-                className={inputCls + ' cursor-pointer'}
+                style={{ ...inputStyle, cursor: 'pointer' }}
               >
                 {FORMAT_OPTIONS.map(f => (
-                  <option key={f.id} value={f.id} style={{ background: '#0f0f1a' }}>
+                  <option key={f.id} value={f.id} style={{ background: C.white, color: C.navy }}>
                     {f.label} — {f.aspectRatio}
                   </option>
                 ))}
               </select>
-              {currentFmt.id === 'INSTAGRAM_CAROUSEL' ? (
-                <div className="flex items-start gap-2 px-3 py-2.5 bg-violet-500/8 border border-violet-500/20 rounded-xl">
-                  <Layers className="w-3.5 h-3.5 text-violet-400 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-violet-300/70">
-                    Modo carrossel ativo — o sistema vai gerar múltiplos slides com estratégia narrativa (Hook → Benefício → CTA).
-                    Para personalizar a quantidade, escreva "carrossel de X slides" no campo Contexto abaixo (3 a 10 slides).
-                  </p>
-                </div>
-              ) : currentFmt.dangerZoneIds.length > 0 ? (
-                <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-500/8 border border-amber-500/20 rounded-xl">
-                  <ShieldCheck className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-amber-300/70">
-                    Safe area ativa — {currentFmt.dangerZoneIds.length} zona{currentFmt.dangerZoneIds.length > 1 ? 's' : ''} de perigo da {currentFmt.platform} protegidas.
-                    {currentFmt.aspectRatio === '9:16' && ' Produto, textos e CTA protegidos para Stories/Reels.'}
-                  </p>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/6 border border-emerald-500/15 rounded-xl">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                  <p className="text-xs text-emerald-300/60">
-                    Formato sem zonas de perigo — safe area padrão aplicada.
+              {formatId === 'INSTAGRAM_CAROUSEL' && (
+                <div className="mt-3 flex items-start gap-2 px-3 py-2.5 rounded-xl"
+                  style={{ background: `${C.orange}08`, border: `1px solid ${C.orange}30` }}>
+                  <span style={{ color: C.orange, fontSize: 15, lineHeight: 1 }}>⊞</span>
+                  <p className="text-xs" style={{ color: C.navy }}>
+                    Modo carrossel — serão gerados <strong>3 slides</strong> automaticamente:
+                    abertura, desenvolvimento e CTA.
                   </p>
                 </div>
               )}
             </div>
 
-            {/* Upload */}
-            <div className="rounded-2xl border border-white/8 bg-white/2 p-5 space-y-3">
-              <div className="flex items-center gap-2">
-                <ImageIcon className="w-4 h-4 text-violet-400" />
-                <h2 className="text-sm font-semibold text-white/70">Produto de referência</h2>
-                <span className="ml-auto text-xs text-white/25">opcional</span>
+            {/* Produto */}
+            <div style={cardStyle}>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+                  style={{ background: `${C.orange}15` }}>
+                  <ImageIcon className="w-3.5 h-3.5" style={{ color: C.orange }} />
+                </div>
+                <CardLabel>Produto de referência</CardLabel>
+                <span className="ml-auto text-xs" style={{ color: C.muted }}>opcional</span>
               </div>
               <UploadZone
                 label="Upload do Produto"
-                hint="PNG · JPG · WebP — o produto será o herói visual"
+                hint="PNG · JPG · WebP — herói visual da arte"
                 image={productImage}
                 onUpload={setProductImage}
                 onRemove={() => setProductImage(null)}
               />
             </div>
 
-            {/* Nicho + Estilo */}
-            <div className="rounded-2xl border border-white/8 bg-white/2 p-5 space-y-4">
-              <h2 className="text-sm font-semibold text-white/70">Identidade visual</h2>
-
-              <div>
-                <label className="text-xs text-white/35 uppercase tracking-wider font-semibold mb-2 block">Nicho</label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {NICHES.map(n => (
-                    <button key={n.value} onClick={() => setNiche(n.value)}
-                      className={[
-                        'px-3 py-2.5 rounded-xl text-xs font-medium text-left transition-all border',
-                        niche === n.value
-                          ? 'bg-violet-500/20 border-violet-400/50 text-violet-200'
-                          : 'bg-white/4 border-white/8 text-white/45 hover:border-white/20 hover:text-white/70',
-                      ].join(' ')}
-                    >{n.label}</button>
-                  ))}
+            {/* Descrição */}
+            <div style={{ ...cardStyle, border: `1.5px solid ${C.orange}50` }}>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0"
+                  style={{ background: `${C.orange}15` }}>
+                  <Sparkles className="w-3.5 h-3.5" style={{ color: C.orange }} />
                 </div>
+                <CardLabel>Descreva sua arte</CardLabel>
+                <span className="ml-auto text-xs font-bold" style={{ color: C.orange }}>*</span>
               </div>
-
-              <div>
-                <label className="text-xs text-white/35 uppercase tracking-wider font-semibold mb-2 block">Estilo Visual</label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {STYLES.map(s => (
-                    <button key={s.value} onClick={() => setStyle(s.value)}
-                      className={[
-                        'px-4 py-3 rounded-xl text-left transition-all border',
-                        style === s.value ? 'bg-violet-500/20 border-violet-400/50' : 'bg-white/4 border-white/8 hover:border-white/20',
-                      ].join(' ')}
-                    >
-                      <p className={['text-sm font-semibold', style === s.value ? 'text-violet-200' : 'text-white/65'].join(' ')}>{s.label}</p>
-                      <p className="text-xs text-white/25 mt-0.5">{s.desc}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Copy — overlay preciso sobre a imagem gerada */}
-            <div className="rounded-2xl border border-violet-500/15 bg-violet-500/5 p-5 space-y-4">
-              <div className="flex items-center gap-2">
-                <Type className="w-4 h-4 text-violet-400" />
-                <h2 className="text-sm font-semibold text-white/70">Copy da Arte</h2>
-              </div>
-              <p className="text-xs text-white/30 -mt-1">
-                O texto é renderizado com precisão pixel sobre a imagem — sem distorção, sem corte, exatamente como você digitou. O download já inclui a composição final.
+              <p className="text-xs mb-3" style={{ color: C.muted }}>
+                Descreva em poucas palavras. O modelo gera copy, composição, tipografia e logomarca integrados.
               </p>
-
-              <div>
-                <label className="text-xs text-white/40 uppercase tracking-wider font-semibold mb-2 block">
-                  Headline <span className="text-violet-400">*</span>
-                </label>
-                <input type="text" value={headline} onChange={e => setHeadline(e.target.value)}
-                  placeholder="Ex: ELEGÂNCIA QUE TRABALHA PARA VOCÊ"
-                  className={inputCls}
-                />
-                <p className="text-xs text-white/20 mt-1.5">Grande, impactante, em maiúsculas recomendado</p>
-              </div>
-
-              <div>
-                <label className="text-xs text-white/40 uppercase tracking-wider font-semibold mb-2 block">
-                  Subheadline <span className="text-white/20">(opcional)</span>
-                </label>
-                <input type="text" value={subheadline} onChange={e => setSubheadline(e.target.value)}
-                  placeholder="Ex: Mais eficiência e economia para o seu dia a dia"
-                  className={inputCls}
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-white/40 uppercase tracking-wider font-semibold mb-2 block">
-                  CTA <span className="text-white/20">(opcional)</span>
-                </label>
-                <input type="text" value={cta} onChange={e => setCta(e.target.value)}
-                  placeholder="Ex: FALE COM NOSSA EQUIPE · (69) 99900-0000"
-                  className={inputCls}
-                />
-              </div>
-
-              <div>
-                <label className="text-xs text-white/40 uppercase tracking-wider font-semibold mb-2 block">
-                  Contexto / Objetivo <span className="text-white/20">(opcional)</span>
-                </label>
-                <textarea value={objective} onChange={e => setObjective(e.target.value)}
-                  placeholder={
-                    formatId === 'INSTAGRAM_CAROUSEL'
-                      ? 'Ex: Carrossel de 5 slides para lançamento da Toro 2026 — foco em força e tecnologia'
-                      : 'Ex: Lançamento do Fiorino 2026 para pequenos empresários — foco em economia e robustez'
-                  }
-                  rows={2}
-                  className={inputCls + ' resize-none'}
-                />
-              </div>
+              <textarea
+                ref={descRef}
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                placeholder={
+                  formatId === 'INSTAGRAM_CAROUSEL'
+                    ? 'Ex: Carrossel para lançamento da Nova Fiat Toro 4x4 — força, tecnologia e aventura'
+                    : 'Ex: Criativo para lançamento da Nova Fiat Toro 4x4 no Instagram'
+                }
+                rows={3}
+                style={{ ...inputStyle, resize: 'none' }}
+              />
             </div>
 
             {/* Erro */}
             {error && (
-              <div className="flex items-start gap-3 p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
-                <X className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-red-300">{error}</p>
+              <div className="flex items-start gap-3 p-4 rounded-xl"
+                style={{ background: '#FEF2F2', border: '1px solid #FECACA' }}>
+                <X className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-red-700">{error}</p>
               </div>
             )}
 
-            {/* Botão */}
+            {/* Botão Gerar */}
             <button
-              onClick={handleGenerate}
+              onClick={() => handleGenerate()}
               disabled={!canGenerate}
-              className={[
-                'w-full flex items-center justify-center gap-3 py-4 rounded-2xl font-bold text-base transition-all',
-                canGenerate
-                  ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:opacity-90 shadow-[0_0_40px_rgba(139,92,246,0.25)]'
-                  : 'bg-white/5 border border-white/8 text-white/25 cursor-not-allowed',
-              ].join(' ')}
+              className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl font-bold text-base transition-all"
+              style={canGenerate ? {
+                background: C.navy,
+                color:      C.orange,
+                boxShadow:  `0 4px 20px rgba(5,45,100,0.25)`,
+              } : {
+                background: '#E2EAF4',
+                color:      C.muted,
+                cursor:     'not-allowed',
+              }}
             >
-              {formatId === 'INSTAGRAM_CAROUSEL'
-                ? <Layers className={['w-5 h-5', loading ? 'animate-spin' : ''].join(' ')} />
-                : <Sparkles className={['w-5 h-5', loading ? 'animate-spin' : ''].join(' ')} />
+              {loading
+                ? <Loader2 className="w-5 h-5 animate-spin" />
+                : <Wand2 className="w-5 h-5" />
               }
               {loading
-                ? (formatId === 'INSTAGRAM_CAROUSEL' ? 'Gerando carrossel estratégico...' : 'Gerando arte com safe area...')
-                : (formatId === 'INSTAGRAM_CAROUSEL' ? 'Gerar Carrossel Estratégico' : 'Gerar Arte Premium')
+                ? (formatId === 'INSTAGRAM_CAROUSEL' ? 'Gerando 3 slides...' : 'Gerando arte...')
+                : (formatId === 'INSTAGRAM_CAROUSEL' ? 'Gerar Carrossel (3 slides)' : 'Gerar Arte Premium')
               }
             </button>
           </div>
 
-          {/* ── Resultado ── */}
-          <div className="lg:sticky lg:top-6">
+          {/* ── RESULTADO ──────────────────────────────────────── */}
+          <div className="lg:sticky lg:top-6 space-y-3">
             {loading ? (
               <LoadingCard msgIndex={msgIndex} formatId={formatId} />
-            ) : result?.slides?.length ? (
-              <CarouselResultCard result={result} onRegenerate={handleGenerate} />
-            ) : result ? (
-              <ResultCard result={result} onRegenerate={handleGenerate} />
-            ) : (
-              <div className={`rounded-2xl border border-white/6 bg-white/2 ${getAspectClass(formatId)} flex flex-col items-center justify-center gap-4 text-center p-8`}>
-                <div className="w-16 h-16 rounded-2xl bg-white/4 flex items-center justify-center">
-                  {formatId === 'INSTAGRAM_CAROUSEL'
-                    ? <Layers className="w-8 h-8 text-white/15" />
-                    : <Sparkles className="w-8 h-8 text-white/15" />
-                  }
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-white/25">
-                    {formatId === 'INSTAGRAM_CAROUSEL' ? 'Seu carrossel estratégico' : 'Sua arte premium'}
-                  </p>
-                  <p className="text-xs text-white/12 mt-1">
-                    {formatId === 'INSTAGRAM_CAROUSEL'
-                      ? <>Preencha headline e objetivo,<br />clique em Gerar Carrossel</>
-                      : <>Escolha o formato, preencha headline<br />e clique em Gerar Arte Premium</>
+            ) : hasResult ? (
+              <>
+                {/* Arte */}
+                {result!.isCarousel && result!.slides ? (
+                  <SlideViewer
+                    slides={result!.slides}
+                    currentSlide={currentSlide}
+                    onSlideChange={setCurrentSlide}
+                  />
+                ) : result!.imageBase64 ? (
+                  <div className="rounded-2xl overflow-hidden"
+                    style={{ border: `1px solid ${C.border}`, background: C.white }}>
+                    <div className={`relative w-full ${getAspectClass(result!.formatId ?? 'INSTAGRAM_POST')}`}>
+                      <img
+                        src={`data:${result!.mimeType ?? 'image/png'};base64,${result!.imageBase64}`}
+                        alt="Arte gerada"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute top-3 right-3 flex flex-col gap-1.5 items-end">
+                        {result!.provider && (
+                          <span className="px-2 py-1 rounded-lg text-xs backdrop-blur"
+                            style={{ background: 'rgba(5,45,100,0.75)', color: 'rgba(255,255,255,0.75)', border: '1px solid rgba(255,255,255,0.15)' }}>
+                            {result!.provider}
+                          </span>
+                        )}
+                        {result!.hasLogo && (
+                          <span className="px-2 py-1 rounded-lg text-xs font-bold"
+                            style={{ background: C.orange, color: C.white }}>
+                            Logo incluída
+                          </span>
+                        )}
+                      </div>
+                      {result!.formatLabel && (
+                        <div className="absolute bottom-3 left-3">
+                          <span className="px-2 py-1 rounded-lg text-xs backdrop-blur"
+                            style={{ background: 'rgba(5,45,100,0.75)', color: 'rgba(255,255,255,0.75)', border: '1px solid rgba(255,255,255,0.15)' }}>
+                            {result!.formatLabel}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Painel Refazer */}
+                {refazerMode && (
+                  <div style={{ ...cardStyle, border: `1.5px solid ${C.orange}40` }}>
+                    <p className="text-sm font-bold flex items-center gap-2 mb-3" style={{ color: C.navy }}>
+                      <RotateCcw className="w-4 h-4" style={{ color: C.orange }} />
+                      Quais ajustes você quer fazer?
+                      {result!.isCarousel && (
+                        <span className="text-xs font-normal ml-auto" style={{ color: C.muted }}>
+                          Slide {currentSlide + 1}
+                        </span>
+                      )}
+                    </p>
+                    <textarea
+                      ref={refazerRef}
+                      value={refazerText}
+                      onChange={e => setRefazerText(e.target.value)}
+                      placeholder="Ex: Fundo mais escuro, aumentar o carro, tons azuis..."
+                      rows={3}
+                      style={{ ...inputStyle, resize: 'none', marginBottom: 10 }}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleRefazer}
+                        disabled={refazerLoading || !refazerText.trim()}
+                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-opacity hover:opacity-90 disabled:opacity-40"
+                        style={{ background: C.navy, color: C.orange }}>
+                        {refazerLoading
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <Wand2 className="w-4 h-4" />
+                        }
+                        {refazerLoading ? 'Gerando...' : 'Gerar com ajustes'}
+                      </button>
+                      <button
+                        onClick={() => { setRefazerMode(false); setRefazerText('') }}
+                        className="px-4 py-2.5 rounded-xl text-sm font-medium transition-opacity hover:opacity-70"
+                        style={{ border: `1px solid ${C.border}`, color: C.muted }}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Botões de ação */}
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={handleAprovar}
+                    disabled={saving}
+                    className="flex flex-col items-center gap-1.5 py-3.5 rounded-xl text-xs font-bold transition-all hover:opacity-90 disabled:opacity-50 shadow-sm"
+                    style={{ background: C.orange, color: C.white }}>
+                    {saving
+                      ? <Loader2 className="w-5 h-5 animate-spin" />
+                      : <CheckCircle2 className="w-5 h-5" />
                     }
+                    {saving ? 'Salvando...' : 'Aprovar Arte'}
+                  </button>
+
+                  <button
+                    onClick={() => setRefazerMode(v => !v)}
+                    disabled={refazerLoading}
+                    className="flex flex-col items-center gap-1.5 py-3.5 rounded-xl text-xs font-bold transition-all hover:opacity-90 shadow-sm"
+                    style={{
+                      background: refazerMode ? C.navy : C.white,
+                      border:     `1.5px solid ${refazerMode ? C.navy : C.border}`,
+                      color:      refazerMode ? C.white : C.navy,
+                    }}>
+                    <RotateCcw className="w-5 h-5" style={{ color: refazerMode ? C.white : C.orange }} />
+                    Refazer Arte
+                  </button>
+
+                  <button
+                    onClick={handleReprovar}
+                    className="flex flex-col items-center gap-1.5 py-3.5 rounded-xl text-xs font-bold transition-all hover:opacity-90 shadow-sm"
+                    style={{
+                      background: '#FEF2F2',
+                      border:     '1.5px solid #FECACA',
+                      color:      '#DC2626',
+                    }}>
+                    <ThumbsDown className="w-5 h-5" />
+                    Reprovar Arte
+                  </button>
+                </div>
+
+                {/* Download */}
+                <button onClick={handleDownload}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-opacity hover:opacity-80"
+                  style={{ background: C.white, border: `1px solid ${C.border}`, color: C.muted }}>
+                  <Download className="w-4 h-4" />
+                  {result!.isCarousel ? 'Baixar todos os slides' : 'Baixar arte'}
+                </button>
+              </>
+            ) : (
+              /* Empty state */
+              <div className="rounded-2xl flex flex-col items-center justify-center gap-5 text-center p-10"
+                style={{ background: C.white, border: `1px solid ${C.border}`, minHeight: 420 }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/landing/mascote-ze-post.webp"
+                  alt="Zé Post"
+                  className="w-36 h-36 object-contain"
+                  style={{ filter: 'drop-shadow(0 4px 20px rgba(254,121,2,0.20))' }}
+                />
+                <div>
+                  <p className="text-base font-bold" style={{ color: C.navy }}>
+                    Sua arte premium aparece aqui
                   </p>
+                  <p className="text-sm mt-1.5 max-w-[200px] mx-auto" style={{ color: C.muted }}>
+                    Descreva o criativo e clique em Gerar
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 px-4 py-2 rounded-full"
+                  style={{ background: `${C.orange}10`, border: `1px solid ${C.orange}30` }}>
+                  <Sparkles className="w-3.5 h-3.5" style={{ color: C.orange }} />
+                  <span className="text-xs font-semibold" style={{ color: C.orange }}>
+                    Powered by Zé Post Premium
+                  </span>
                 </div>
               </div>
             )}
@@ -948,22 +862,37 @@ export default function ZePremiumPage() {
         </div>
       </div>
 
+      {/* Approve Modal */}
+      {approveModal && (
+        <ApproveModal
+          onPublish={() => { setApproveModal(false); router.push('/publicacoes') }}
+          onSchedule={() => { setApproveModal(false); router.push('/agenda') }}
+          onClose={() => setApproveModal(false)}
+        />
+      )}
+
       <style jsx global>{`
         @keyframes shimmer {
-          0% { transform: translateX(-100%) }
-          100% { transform: translateX(100%) }
+          0%   { transform: translateX(-100%) }
+          100% { transform: translateX(200%) }
         }
         @keyframes progress {
           0%   { width: 0% }
-          15%  { width: 20% }
-          40%  { width: 48% }
-          70%  { width: 72% }
-          90%  { width: 87% }
-          100% { width: 92% }
+          20%  { width: 25% }
+          50%  { width: 58% }
+          80%  { width: 78% }
+          100% { width: 90% }
         }
-        .animate-shimmer { animation: shimmer 2s infinite }
-        .animate-progress { animation: progress 90s ease-out forwards }
-        .animate-progress-slow { animation: progress 240s ease-out forwards }
+        .animate-shimmer  { animation: shimmer 2.2s infinite }
+        .animate-progress { animation: progress 120s ease-out forwards }
+
+        select option { background: #FFFFFF; color: #052D64; }
+        textarea::placeholder, input::placeholder { color: #A0AEBE; }
+        textarea:focus, select:focus {
+          outline: none;
+          border-color: #FE7902 !important;
+          box-shadow: 0 0 0 3px rgba(254,121,2,0.10);
+        }
       `}</style>
     </div>
   )

@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 export class NoProviderError extends Error {
   constructor() {
     super(
-      'Nenhum provedor premium de imagem configurado. Configure GEMINI_IMAGE_API_KEY, FAL_KEY, IDEOGRAM_API_KEY, RECRAFT_API_KEY ou OPENAI_API_KEY.'
+      'Nenhum provedor premium de imagem configurado. Configure GEMINI_IMAGE_API_KEY, FAL_KEY, IDEOGRAM_API_KEY, RECRAFT_API_KEY, STABILITY_API_KEY ou OPENAI_API_KEY.'
     )
     this.name = 'NoProviderError'
   }
@@ -26,6 +26,9 @@ interface AspectRatios {
   dalleSize: '1024x1024' | '1792x1024' | '1024x1792'
   falW: number
   falH: number
+  stability: string
+  gpt2W: number   // gpt-image-2: dimensões divisíveis por 16, aspect ratio exato
+  gpt2H: number
 }
 
 function getAspectRatios(contentType: string): AspectRatios {
@@ -33,17 +36,17 @@ function getAspectRatios(contentType: string): AspectRatios {
   const horizontal = ['post_facebook', 'post_linkedin_imagem', 'youtube']
 
   if (vertical.includes(contentType)) {
-    return { gemini: '9:16', ideogram: 'ASPECT_9_16', recraftSize: '1024x1820', dalleSize: '1024x1792', falW: 1024, falH: 1820 }
+    return { gemini: '9:16', ideogram: 'ASPECT_9_16', recraftSize: '1024x1820', dalleSize: '1024x1792', falW: 1024, falH: 1820, stability: '9:16', gpt2W: 1152, gpt2H: 2048 }
   }
   if (horizontal.includes(contentType)) {
-    return { gemini: '16:9', ideogram: 'ASPECT_16_9', recraftSize: '1820x1024', dalleSize: '1792x1024', falW: 1820, falH: 1024 }
+    return { gemini: '16:9', ideogram: 'ASPECT_16_9', recraftSize: '1820x1024', dalleSize: '1792x1024', falW: 1820, falH: 1024, stability: '16:9', gpt2W: 2048, gpt2H: 1152 }
   }
   if (contentType === 'carrossel') {
     // 4:5 Instagram Carousel — Sharp compositor faz o resize final para 1080×1350
-    return { gemini: '4:5', ideogram: 'ASPECT_4_5', recraftSize: '1024x1280', dalleSize: '1024x1792', falW: 1024, falH: 1280 }
+    return { gemini: '4:5', ideogram: 'ASPECT_4_5', recraftSize: '1024x1280', dalleSize: '1024x1792', falW: 1024, falH: 1280, stability: '4:5', gpt2W: 1280, gpt2H: 1600 }
   }
   // square: post_instagram, post_linkedin_texto, default
-  return { gemini: '1:1', ideogram: 'ASPECT_1_1', recraftSize: '1024x1024', dalleSize: '1024x1024', falW: 1024, falH: 1024 }
+  return { gemini: '1:1', ideogram: 'ASPECT_1_1', recraftSize: '1024x1024', dalleSize: '1024x1024', falW: 1024, falH: 1024, stability: '1:1', gpt2W: 1024, gpt2H: 1024 }
 }
 
 // ── Fetch image URL as base64 ─────────────────────────────────
@@ -163,34 +166,92 @@ async function recraftImageGen(prompt: string, size: string): Promise<ImageResul
   return { base64, mimeType, provider: 'Recraft v3' }
 }
 
-// ── Provider: OpenAI gpt-image-1 ─────────────────────────────
+// ── Provider: Stability AI ───────────────────────────────────
+// Sempre usa Stable Image Core (txt-to-img) com aspect_ratio nativo.
+// SD3.5 img-to-img NÃO é adequado para composições publicitárias — ele
+// transforma a foto do produto em vez de criar uma cena nova com o produto
+// bem posicionado. O prompt já descreve o estilo, nicho e layout 3-zonas.
+// Referência de produto (productBase64) é ignorada na API; o prompt descreve
+// o tipo de produto pelo nicho selecionado.
+
+async function stabilityImageGen(
+  prompt: string,
+  aspectRatio: string,
+): Promise<ImageResult> {
+  const key = process.env.STABILITY_API_KEY!
+  const form = new FormData()
+  form.append('prompt', prompt)
+  form.append('aspect_ratio', aspectRatio)
+  form.append('output_format', 'png')
+
+  const res = await fetch('https://api.stability.ai/v2beta/stable-image/generate/core', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${key}`,
+      Accept: 'application/json',
+    },
+    body: form,
+  })
+
+  if (!res.ok) throw new Error(`Stability AI error ${res.status}: ${await res.text()}`)
+  const data = await res.json()
+  const base64 = data.image
+  if (!base64) throw new Error('Stability AI: sem imagem na resposta')
+  return { base64, mimeType: 'image/png', provider: 'Stability AI Core' }
+}
+
+// ── Provider: OpenAI gpt-image-2 ─────────────────────────────
+// Lançado em abril/2026 — suporta dimensões arbitrárias (múltiplos de 16),
+// incluindo 9:16 portrait nativo. Renderiza texto com ~99% de acurácia.
 // Com produto: usa /v1/images/edits (mantém produto na cena)
 // Sem produto: usa /v1/images/generations
 
+// Arredonda para múltiplo de 16 (requisito do gpt-image-2)
+function snapTo16(n: number): number {
+  return Math.round(n / 16) * 16
+}
+
 async function openaiImageGen(
   prompt: string,
-  size: '1024x1024' | '1792x1024' | '1024x1792',
+  width: number,
+  height: number,
   productBase64?: string,
   productMime?: string,
+  logoBase64?: string,
 ): Promise<ImageResult> {
-  const key = process.env.OPENAI_API_KEY!
-  const gptSize =
-    size === '1792x1024' ? '1536x1024'
-    : size === '1024x1792' ? '1024x1536'
-    : '1024x1024'
+  const key  = process.env.OPENAI_API_KEY!
+  const w    = snapTo16(width)
+  const h    = snapTo16(height)
+  const size = `${w}x${h}`
 
-  if (productBase64) {
-    // Edits endpoint: usa imagem do produto como base visual
+  // Usa edits endpoint quando há produto ou logo como referência visual
+  if (productBase64 || logoBase64) {
     const form = new FormData()
-    form.append('model', 'gpt-image-1')
+    form.append('model', 'gpt-image-2')
     form.append('prompt', prompt)
-    form.append('size', gptSize)
+    form.append('size', size)
     form.append('n', '1')
-    const mime = (productMime ?? 'image/png') as string
-    const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg'
-    const bytes = Buffer.from(productBase64, 'base64')
-    const blob = new Blob([bytes], { type: mime })
-    form.append('image[]', blob, `product.${ext}`)
+
+    // Produto como primeira imagem de referência
+    if (productBase64) {
+      const mime  = (productMime ?? 'image/png') as string
+      const ext   = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg'
+      const bytes = Buffer.from(productBase64, 'base64')
+      const blob  = new Blob([bytes], { type: mime })
+      form.append('image[]', blob, `product.${ext}`)
+    }
+
+    // Logo da empresa como segunda imagem de referência
+    if (logoBase64) {
+      const logoBytes = Buffer.from(logoBase64, 'base64')
+      const logoBlob  = new Blob([logoBytes], { type: 'image/png' })
+      form.append('image[]', logoBlob, 'logo.png')
+    }
+
+    const providerLabel =
+      productBase64 && logoBase64 ? 'OpenAI gpt-image-2 (produto + logo)' :
+      productBase64               ? 'OpenAI gpt-image-2 (produto)' :
+                                    'OpenAI gpt-image-2 (logo)'
 
     const res = await fetch('https://api.openai.com/v1/images/edits', {
       method: 'POST',
@@ -199,22 +260,22 @@ async function openaiImageGen(
     })
     if (!res.ok) throw new Error(`OpenAI edits error ${res.status}: ${await res.text()}`)
     const data = await res.json()
-    const b64 = data.data?.[0]?.b64_json
+    const b64  = data.data?.[0]?.b64_json
     if (!b64) throw new Error('OpenAI edits: sem imagem na resposta')
-    return { base64: b64, mimeType: 'image/png', provider: 'OpenAI gpt-image-1 (produto)' }
+    return { base64: b64, mimeType: 'image/png', provider: providerLabel }
   }
 
-  // Generations endpoint: sem produto
+  // Generations endpoint: sem produto e sem logo
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'gpt-image-1', prompt, n: 1, size: gptSize }),
+    body: JSON.stringify({ model: 'gpt-image-2', prompt, n: 1, size }),
   })
-  if (!res.ok) throw new Error(`OpenAI gpt-image-1 error ${res.status}: ${await res.text()}`)
+  if (!res.ok) throw new Error(`OpenAI gpt-image-2 error ${res.status}: ${await res.text()}`)
   const data = await res.json()
-  const b64 = data.data?.[0]?.b64_json
-  if (!b64) throw new Error('OpenAI: sem imagem na resposta')
-  return { base64: b64, mimeType: 'image/png', provider: 'OpenAI gpt-image-1' }
+  const b64  = data.data?.[0]?.b64_json
+  if (!b64) throw new Error('OpenAI gpt-image-2: sem imagem na resposta')
+  return { base64: b64, mimeType: 'image/png', provider: 'OpenAI gpt-image-2' }
 }
 
 // ── Main: provider selection ──────────────────────────────────
@@ -226,51 +287,52 @@ export async function generateImage(
   H: number,
   productBase64?: string,
   productMime?: string,
+  logoBase64?: string,
 ): Promise<ImageResult> {
   const ar = getAspectRatios(contentType)
 
-  if (process.env.GEMINI_IMAGE_API_KEY) return geminiImageGen(prompt, ar.gemini)
-  if (process.env.FAL_KEY) return falImageGen(prompt, ar.falW, ar.falH, productBase64)
-  if (process.env.IDEOGRAM_API_KEY) return ideogramImageGen(prompt, ar.ideogram)
-  if (process.env.RECRAFT_API_KEY) return recraftImageGen(prompt, ar.recraftSize)
-  if (process.env.OPENAI_API_KEY) return openaiImageGen(prompt, ar.dalleSize, productBase64, productMime)
+  // Provider único: gpt-image-2
+  // Outros providers (Gemini, Fal.ai, Ideogram, Recraft, Stability AI) podem ser
+  // reativados aqui futuramente conforme necessidade.
+  if (process.env.OPENAI_API_KEY) return openaiImageGen(prompt, ar.gpt2W, ar.gpt2H, productBase64, productMime, logoBase64)
 
   throw new NoProviderError()
 }
 
 // ── Geração especializada para 9:16 vertical (Stories / Reels) ───────
-// OpenAI gpt-image-1 NÃO suporta portrait 9:16 de forma confiável.
-// Esta função força Fal.ai Flux Pro como provider primário para formatos
-// verticais, garantindo dimensões corretas e composição portrait de qualidade.
+// Providers validados para composição portrait 9:16 com qualidade publicitária:
 //
-// Hierarquia de fallback:
-//   1. Fal.ai Flux Pro / Kontext (melhor para portrait 9:16)
-//   2. Gemini Imagen 3 (suporte nativo a 9:16)
-//   3. Ideogram v2 (aspect ratio explícito)
-//   4. OpenAI gpt-image-1 (último recurso — qualidade limitada em portrait)
+//   1. Fal.ai Flux Pro / Kontext  — MELHOR: composição portrait nativa,
+//      suporta img-to-img com produto via Flux Kontext Pro.
+//   2. Gemini Imagen 3            — suporte nativo a 9:16, boa qualidade.
+//   3. Ideogram v2                — aspect ratio explícito, segue prompt bem.
+//
+// Providers NÃO adequados para 9:16 publicitário (removidos desta rota):
+//   ✗ Stability AI Core  — ignora prompts complexos, gera sujeitos errados
+//   ✗ OpenAI gpt-image-1 — não suporta portrait 9:16 de forma confiável
+//
+// Configure FAL_KEY no .env.local para ativar a melhor qualidade.
 
 export async function generateImage916(
-  prompt:        string,
+  prompt:         string,
   productBase64?: string,
-  productMime?:  string,
+  productMime?:   string,
+  logoBase64?:    string,
 ): Promise<ImageResult> {
-  // Dimensões para 9:16 portrait — Fal.ai suporta arbitrary sizes
-  const W = 1024
-  const H = 1792
-
-  // 1. Fal.ai: melhor qualidade em portrait, suporta Kontext para produto
-  if (process.env.FAL_KEY) return falImageGen(prompt, W, H, productBase64)
-
-  // 2. Gemini Imagen 3: suporte nativo a 9:16
-  if (process.env.GEMINI_IMAGE_API_KEY) return geminiImageGen(prompt, '9:16')
-
-  // 3. Ideogram: aspect ratio explícito 9:16
-  if (process.env.IDEOGRAM_API_KEY) return ideogramImageGen(prompt, 'ASPECT_9_16')
-
-  // 4. OpenAI último recurso — usa portrait (1024x1536) mas com limitações conhecidas
-  if (process.env.OPENAI_API_KEY) return openaiImageGen(prompt, '1024x1792', productBase64, productMime)
+  // Provider único: gpt-image-2 a 1152×2048 (9:16 nativo, renderiza texto com ~99% acurácia)
+  // Outros providers (Fal.ai, Gemini, Ideogram) podem ser reativados futuramente.
+  if (process.env.OPENAI_API_KEY) return openaiImageGen(prompt, 1152, 2048, productBase64, productMime, logoBase64)
 
   throw new NoProviderError()
+}
+
+// ── Detecção de provider ativo ────────────────────────────────
+// Permite ao route.ts saber qual provider será usado ANTES de chamar generateImage,
+// para adaptar o prompt (ex: incluir copy textual quando gpt-image-2 for usado).
+
+export function willUseGPTImage2(_isVertical9x16: boolean): boolean {
+  // gpt-image-2 é o único provider ativo
+  return !!process.env.OPENAI_API_KEY
 }
 
 // ── Upload to Supabase Storage ────────────────────────────────

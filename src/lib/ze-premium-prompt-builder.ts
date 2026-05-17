@@ -150,10 +150,18 @@ export interface ZePremiumPromptInput {
   objective: string
   niche: ZePremiumNiche
   style: ZePremiumStyle
-  // headline/subheadline/cta já NÃO são mais injetados no prompt do modelo —
-  // são renderizados via text-overlay-engine no frontend.
   hasProductImage: boolean
   format?: SocialFormat   // formato da mídia — define safe area e dimensões
+  // Quando renderTextNatively=true (gpt-image-2), o copy é incluído no prompt
+  // e renderizado pelo modelo com tipografia integrada ao layout.
+  // Quando false (outros providers), o texto é aplicado via canvas no frontend.
+  renderTextNatively?: boolean
+  headline?:    string
+  subheadline?: string
+  cta?:         string
+  // Logomarca da empresa — quando presente, instrui o modelo a posicioná-la no criativo
+  companyName?: string
+  hasLogoImage?: boolean   // true = logo foi passada como imagem para o modelo
 }
 
 export function buildZePremiumPrompt(input: ZePremiumPromptInput): string {
@@ -178,9 +186,10 @@ function buildVertical916Prompt(input: ZePremiumPromptInput): string {
   const platform   = input.format?.label ?? 'Instagram Stories'
 
   // Referência ao produto
-  const productRef = input.hasProductImage
-    ? 'faithfully recreate the provided product — preserve all colors, shape, proportions and details exactly as in the reference'
-    : nicheBoost
+  // Nota: Fal.ai (Flux Kontext) recebe a imagem do produto via img-to-img e usa
+  // "faithfully recreate". Outros providers (Stability AI, Gemini, Ideogram) recebem
+  // apenas o prompt — nesse caso usamos nicheBoost para descrever o tipo de produto.
+  const productRef = nicheBoost
 
   const parts: string[] = [
 
@@ -206,14 +215,32 @@ function buildVertical916Prompt(input: ZePremiumPromptInput): string {
     preset.atmosphere,
     preset.lighting,
 
-    // ── 5. Qualidade ───────────────────────────────────────────────
+    // ── 5. Qualidade + Logo ────────────────────────────────────────
     preset.quality,
-    `ultra premium vertical advertising photograph, no text, no watermark, no UI elements`,
+    input.renderTextNatively
+      ? `ultra premium vertical advertising photograph, no watermark, no UI chrome elements`
+      : `ultra premium vertical advertising photograph, no text, no watermark, no UI elements`,
 
-    // ── 6. Negativo ────────────────────────────────────────────────
+    // Logo da empresa — posicionada no rodapé quando disponível
+    ...(input.hasLogoImage ? [
+      `The company logo (provided as reference image) should appear at the bottom of Zone C, ` +
+      `centered or left-aligned, at approximately 10% of the image width, clearly legible against the background`,
+    ] : []),
+
+    // ── 6. Copy tipográfico (apenas quando gpt-image-2 renderiza o texto) ──
+    ...(input.renderTextNatively && input.headline ? [
+      `ADVERTISING COPY — render this text integrated into the design with professional typography: ` +
+      `HEADLINE: "${input.headline}"` +
+      (input.subheadline ? `, SUBHEADLINE: "${input.subheadline}"` : '') +
+      (input.cta ? `, CTA BUTTON: "${input.cta}"` : ''),
+      `Place headline in large bold premium typeface in Zone C (bottom area), ` +
+      `subheadline below in smaller weight, CTA as a pill-shaped button at the bottom`,
+    ] : []),
+
+    // ── 7. Negativo ────────────────────────────────────────────────
     `avoid: product touching image borders, product cropped at any edge, ` +
-    `vehicle filling entire frame top to bottom, product taller than 50% of image, ` +
-    `any text or letters or numbers in the image`,
+    `vehicle filling entire frame top to bottom, product taller than 50% of image` +
+    (input.renderTextNatively ? '' : `, any text or letters or numbers in the image`),
   ]
 
   return parts.join(', ')
@@ -272,14 +299,39 @@ function buildStandardPrompt(input: ZePremiumPromptInput): string {
   blocks.push(preset.quality)
   const platformLabel = input.format?.label ?? 'Instagram'
   blocks.push(
-    `complete advertising visual background for ${platformLabel}, ` +
-    'professional campaign quality, photorealistic render, no text rendered in the image'
+    `complete advertising visual for ${platformLabel}, ` +
+    'professional campaign quality, photorealistic render' +
+    (input.renderTextNatively ? '' : ', no text rendered in the image')
   )
+
+  // Logo da empresa — posicionada no canto inferior quando disponível
+  if (input.hasLogoImage) {
+    blocks.push(
+      'The company logo (provided as reference image) should appear at the bottom-left or bottom-right corner, ' +
+      'at approximately 12% of the image width, clearly visible against the background'
+    )
+  }
+
+  // ── 7b. COPY (apenas quando gpt-image-2 renderiza o texto) ───────
+  if (input.renderTextNatively && input.headline) {
+    blocks.push(
+      `ADVERTISING COPY — render integrated with premium typography: ` +
+      `HEADLINE: "${input.headline}"` +
+      (input.subheadline ? `, SUBHEADLINE: "${input.subheadline}"` : '') +
+      (input.cta ? `, CTA: "${input.cta}"` : '')
+    )
+    blocks.push(
+      'Place headline in large bold typeface in the lower-left clean area, ' +
+      'subheadline below in lighter weight, CTA as a pill/button at the bottom'
+    )
+  }
 
   // ── 8. NEGATIVE ──────────────────────────────────────────────────
   blocks.push(
-    'avoid: cropped product, oversized vehicle filling entire frame, ' +
-    'any text or letters or typography rendered inside the image, cluttered busy layout'
+    'avoid: cropped product, oversized vehicle filling entire frame' +
+    (input.renderTextNatively
+      ? ', cluttered busy layout'
+      : ', any text or letters or typography rendered inside the image, cluttered busy layout')
   )
 
   return blocks.join(',\n')
